@@ -56,25 +56,31 @@ export async function PUT(
       ? Math.max(0, updatedReading.reading - previousReading.reading)
       : 0
 
-    const costBreakdown = calculateElectricityBill(usage)
-    const estimatedCost = Math.round(costBreakdown.totalCost)
+    let estimatedCost = 0
+    let costBreakdown = null
+    
+    if (usage > 0) {
+      costBreakdown = calculateElectricityBill(usage)
+      estimatedCost = Math.round(costBreakdown.totalCost)
+    }
 
     // Update the reading with calculated values
-    await prisma.meterReading.update({
+    const finalReading = await prisma.meterReading.update({
       where: { id: readingId },
       data: {
         usage,
         estimatedCost
-      }
+      },
+      include: { meter: true }
     })
 
     return NextResponse.json({ 
       reading: {
-        ...updatedReading,
+        ...finalReading,
         usage,
         estimatedCost,
-        slabWarning: costBreakdown.slabWarning,
-        costBreakdown
+        slabWarning: costBreakdown?.slabWarning || false,
+        costBreakdown: costBreakdown
       }
     })
   } catch (error) {

@@ -34,13 +34,22 @@ export async function GET(request: NextRequest) {
           orderBy: { createdAt: 'desc' }
         })
         const usage = prev ? Math.max(0, reading.reading - prev.reading) : 0
-        const costBreakdown = calculateElectricityBill(usage)
+        
+        // Use stored cost if available, otherwise calculate
+        let estimatedCost = reading.estimatedCost
+        let costBreakdown = null
+        
+        if (!estimatedCost && usage > 0) {
+          costBreakdown = calculateElectricityBill(usage)
+          estimatedCost = Math.round(costBreakdown.totalCost)
+        }
+        
         return { 
           ...reading,
           usage,
-          estimatedCost: reading.estimatedCost || Math.round(costBreakdown.totalCost),
-          slabWarning: costBreakdown.slabWarning,
-          costBreakdown
+          estimatedCost: estimatedCost || 0,
+          slabWarning: costBreakdown?.slabWarning || false,
+          costBreakdown: costBreakdown
         }
       })
     )
@@ -86,14 +95,21 @@ export async function POST(request: NextRequest) {
       orderBy: { createdAt: 'desc' }
     })
     const usage = prev ? Math.max(0, newReading.reading - prev.reading) : 0
-    const costBreakdown = calculateElectricityBill(usage)
+    
+    let estimatedCost = 0
+    let costBreakdown = null
+    
+    if (usage > 0) {
+      costBreakdown = calculateElectricityBill(usage)
+      estimatedCost = Math.round(costBreakdown.totalCost)
+    }
 
     // Update the reading with calculated values
     const updatedReading = await prisma.meterReading.update({
       where: { id: newReading.id },
       data: {
         usage,
-        estimatedCost: Math.round(costBreakdown.totalCost),
+        estimatedCost,
         notes: notes?.trim() || null
       },
       include: { meter: true }
@@ -103,9 +119,9 @@ export async function POST(request: NextRequest) {
       reading: {
         ...updatedReading,
         usage,
-        estimatedCost: Math.round(costBreakdown.totalCost),
-        slabWarning: costBreakdown.slabWarning,
-        costBreakdown
+        estimatedCost,
+        slabWarning: costBreakdown?.slabWarning || false,
+        costBreakdown: costBreakdown
       }
     }, { status: 201 })
   } catch (error) {

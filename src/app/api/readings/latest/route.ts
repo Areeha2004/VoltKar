@@ -56,15 +56,30 @@ export async function GET(request: NextRequest) {
           ? Math.max(0, latestReading.reading - previousReading.reading)
           : 0
 
-        const costBreakdown = calculateElectricityBill(usage)
-        const estimatedCost = Math.round(costBreakdown.totalCost)
+        // Use stored cost if available, otherwise calculate
+        let estimatedCost = latestReading.estimatedCost
+        let costBreakdown = null
+        
+        if (!estimatedCost && usage > 0) {
+          costBreakdown = calculateElectricityBill(usage)
+          estimatedCost = Math.round(costBreakdown.totalCost)
+          
+          // Update the reading with calculated cost if it wasn't stored
+          await prisma.meterReading.update({
+            where: { id: latestReading.id },
+            data: { 
+              usage,
+              estimatedCost 
+            }
+          })
+        }
 
         return {
           ...latestReading,
           usage,
-          estimatedCost: latestReading.estimatedCost || estimatedCost,
-          slabWarning: costBreakdown.slabWarning,
-          costBreakdown
+          estimatedCost: estimatedCost || 0,
+          slabWarning: costBreakdown?.slabWarning || false,
+          costBreakdown: costBreakdown
         }
       })
     )

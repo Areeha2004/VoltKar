@@ -2,15 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '../auth/[...nextauth]/route'
 import prisma from '@/lib/prisma'
-
-// Dummy rates
-const BASE_TARIFF = 19.3 // Rs per kWh
-const TAX_RATE = 0.1 // 10% tax
-
-function calculateCost(usage: number) {
-  const baseCost = usage * BASE_TARIFF
-  return Math.round(baseCost + baseCost * TAX_RATE)
-}
+import { calculateElectricityBill } from '@/lib/slabCalculations'
 
 export async function GET(request: NextRequest) {
   try {
@@ -42,10 +34,13 @@ export async function GET(request: NextRequest) {
           orderBy: { createdAt: 'desc' }
         })
         const usage = prev ? Math.max(0, reading.reading - prev.reading) : 0
+        const costBreakdown = calculateElectricityBill(usage)
         return { 
           ...reading,
           usage,
-          estimatedCost: calculateCost(usage)
+          estimatedCost: Math.round(costBreakdown.totalCost),
+          slabWarning: costBreakdown.slabWarning,
+          costBreakdown
         }
       })
     )
@@ -91,12 +86,25 @@ export async function POST(request: NextRequest) {
       orderBy: { createdAt: 'desc' }
     })
     const usage = prev ? Math.max(0, newReading.reading - prev.reading) : 0
+    const costBreakdown = calculateElectricityBill(usage)
 
+    // Update the reading with calculated values
+    const updatedReading = await prisma.meterReading.update({
+      where: { id: newReading.id },
+      data: {
+        usage,
+        estimatedCost: Math.round(costBreakdown.totalCost),
+        notes: notes?.trim() || null
+      },
+      include: { meter: true }
+    })
     return NextResponse.json({
       reading: {
-        ...newReading,
+        ...updatedReading,
         usage,
-        estimatedCost: calculateCost(usage)
+        estimatedCost: Math.round(costBreakdown.totalCost),
+        slabWarning: costBreakdown.slabWarning,
+        costBreakdown
       }
     }, { status: 201 })
   } catch (error) {

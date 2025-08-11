@@ -1,8 +1,10 @@
 "use client";
 import React from 'react'
-import { useState } from "react";
+import { useState , useEffect} from "react";
 import { useSession, signOut } from "next-auth/react";
 import Image from "next/image";
+
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { 
  
@@ -26,6 +28,8 @@ import Navbar from '../../components/layout/Navbar'
 import Sidebar from '../../components/layout/Sidebar'
 import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
+import SlabProgressIndicator from '../../components/readings/SlabProgressIndicator'
+import SlabWarningAlert from '../../components/ui/SlabWarningAlert'
 
 const Dashboard: React.FC = () => {
   const { data: session, status } = useSession();
@@ -41,69 +45,103 @@ const Dashboard: React.FC = () => {
     .map(p => p[0])
     .join("")
     .slice(0, 2)
-    .toUpperCase();
-  const metrics = [
+  const [dashboardStats, setDashboardStats] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+const [alerts, setAlerts] = useState<any[]>([]);
+  // Fetch dashboard stats
+  useEffect(() => {
+    const fetchDashboardStats = async () => {
+      try {
+        const response = await fetch('/api/dashboard/stats')
+        if (response.ok) {
+          const data = await response.json()
+          setDashboardStats(data)
+          setAlerts(data.alerts || [])
+        }
+      } catch (error) {
+        console.error('Failed to fetch dashboard stats:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    if (session?.user?.id) {
+      fetchDashboardStats()
+    }
+  }, [session?.user?.id])
+   
+  const getMetrics = () => {
+    if (!dashboardStats) {
+      return [
+        { title: 'Current Usage', value: '0', unit: 'kWh', change: '0%', changeType: 'neutral', icon: Zap, gradient: 'from-accent-blue to-accent-purple' },
+        { title: 'Forecast Bill', value: '0', unit: 'PKR', change: '0%', changeType: 'neutral', icon: DollarSign, gradient: 'from-primary to-accent-cyan' },
+        { title: 'Cost to Date', value: '0', unit: 'PKR', change: '0%', changeType: 'neutral', icon: TrendingUp, gradient: 'from-accent-amber to-accent-pink' },
+        { title: 'Efficiency Score', value: '0', unit: '%', change: '0%', changeType: 'neutral', icon: Target, gradient: 'from-accent-emerald to-primary' }
+      ]
+    }
+
+    return [
     {
       title: 'Current Usage',
-      value: '850',
+      value: dashboardStats.stats.currentUsage.toString(),
       unit: 'kWh',
-      change: '+12%',
-      changeType: 'increase',
+      change: dashboardStats.stats.usageChange,
+      changeType: dashboardStats.stats.usageChange.startsWith('+') ? 'increase' : 'decrease',
       icon: Zap,
       gradient: 'from-accent-blue to-accent-purple'
     },
     {
       title: 'Forecast Bill',
-      value: '18,500',
+      value: dashboardStats.stats.forecastBill.toLocaleString(),
       unit: 'PKR',
-      change: '-8%',
-      changeType: 'decrease',
+      change: dashboardStats.stats.usageChange, // Using same change as usage for now
+      changeType: dashboardStats.stats.usageChange.startsWith('+') ? 'increase' : 'decrease',
       icon: DollarSign,
       gradient: 'from-primary to-accent-cyan'
     },
     {
       title: 'Cost to Date',
-      value: '12,400',
+      value: dashboardStats.stats.costToDate.toLocaleString(),
       unit: 'PKR',
-      change: '+5%',
-      changeType: 'increase',
+      change: dashboardStats.stats.usageChange,
+      changeType: dashboardStats.stats.usageChange.startsWith('+') ? 'increase' : 'decrease',
       icon: TrendingUp,
       gradient: 'from-accent-amber to-accent-pink'
     },
     {
       title: 'Efficiency Score',
-      value: '78',
+      value: dashboardStats.stats.efficiencyScore.toString(),
       unit: '%',
-      change: '+15%',
+      change: '+15%', // Static for now
       changeType: 'decrease',
       icon: Target,
       gradient: 'from-accent-emerald to-primary'
     }
-  ]
+    ]
+  }
 
-  const alerts = [
-    {
-      type: 'warning',
-      title: 'High Usage Alert',
-      message: 'Your AC usage is 25% higher than usual this week',
-      time: '2 hours ago',
-      priority: 'high'
-    },
-    {
-      type: 'success',
-      title: 'Optimization Success',
-      message: 'You saved Rs 340 by following our recommendations',
-      time: '1 day ago',
-      priority: 'medium'
-    },
-    {
-      type: 'info',
-      title: 'Bill Reminder',
-      message: 'Estimated bill generation in 5 days',
-      time: '2 days ago',
-      priority: 'low'
-    }
-  ]
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navbar />
+        <div className="flex">
+          <Sidebar />
+          <main className="flex-1 p-8">
+            <div className="max-w-7xl mx-auto">
+              <div className="animate-pulse space-y-8">
+                <div className="h-8 bg-background-card rounded w-1/3"></div>
+                <div className="grid md:grid-cols-4 gap-6">
+                  {[1, 2, 3, 4].map(i => (
+                    <div key={i} className="h-32 bg-background-card rounded-2xl"></div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+    )
+  }
 
   const recentReadings = [
     { date: '2024-01-15', meter: 'Main House', reading: 15420, usage: 180, cost: 3200 },
@@ -174,7 +212,7 @@ const Dashboard: React.FC = () => {
 
             {/* Metrics Grid */}
             <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {metrics.map((metric, index) => (
+              {getMetrics().map((metric, index) => (
                 <Card key={index} className="card-premium animate-fade-in"><div style={{ animationDelay: `${index * 0.1}s` }}>
                    <div className="space-y-4">
                     <div className="flex items-center justify-between">
@@ -211,8 +249,28 @@ const Dashboard: React.FC = () => {
             </div>
 
             <div className="grid lg:grid-cols-3 gap-8">
+              {/* Slab Warning Alert */}
+              {dashboardStats?.stats.hasSlabWarnings && (
+                <div className="lg:col-span-3">
+                  <SlabWarningAlert 
+                    units={dashboardStats.stats.currentUsage} 
+                    showSuggestions={true}
+                  />
+                </div>
+              )}
+
+              {/* Slab Progress Indicator */}
+              {dashboardStats?.stats.currentUsage > 0 && (
+                <div className="lg:col-span-2">
+                  <SlabProgressIndicator 
+                    currentUnits={dashboardStats.stats.currentUsage}
+                    projectedUnits={dashboardStats.stats.forecastBill / (dashboardStats.stats.avgCostPerKwh || 20)}
+                  />
+                </div>
+              )}
+
               {/* Alerts Panel */}
-              <div className="lg:col-span-2">
+              <div className={dashboardStats?.stats.currentUsage > 0 ? "" : "lg:col-span-2"}>
                 <Card className="card-premium">
                   <div className="space-y-6">
                     <div className="flex items-center justify-between">
@@ -296,13 +354,13 @@ const Dashboard: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {recentReadings.map((reading, index) => (
+                      {(dashboardStats?.recentReadings || recentReadings).map((reading: any, index: number) => (
                         <tr key={index} className="border-t border-border/30 hover:bg-background-card/30 transition-colors">
                           <td className="py-4 px-6 text-foreground font-mono">{reading.date}</td>
                           <td className="py-4 px-6 text-foreground">{reading.meter}</td>
-                          <td className="py-4 px-6 text-foreground font-mono">{reading.reading.toLocaleString()}</td>
+                          <td className="py-4 px-6 text-foreground font-mono">{reading.reading?.toLocaleString() || '0'}</td>
                           <td className="py-4 px-6 text-foreground font-mono">{reading.usage} kWh</td>
-                          <td className="py-4 px-6 text-primary font-mono font-semibold">Rs {reading.cost.toLocaleString()}</td>
+                          <td className="py-4 px-6 text-primary font-mono font-semibold">Rs {reading.cost?.toLocaleString() || '0'}</td>
                         </tr>
                       ))}
                     </tbody>

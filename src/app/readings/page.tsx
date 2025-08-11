@@ -8,6 +8,11 @@ import Sidebar from '../../components/layout/Sidebar'
 import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
 import Input from '../../components/ui/Input'
+import SlabProgressIndicator from '../../components/readings/SlabProgressIndicator'
+import CostBreakdownCard from '../../components/readings/CostBreakdownCard'
+import ReadingTypeSelector from '../../components/readings/ReadingTypeSelector'
+import SlabWarningAlert from '../../components/ui/SlabWarningAlert'
+import { calculateUsage, projectMonthlyCost } from '../../lib/slabCalculations'
 
 const ReadingEntryPage: React.FC = () => {
   const { data: session } = useSession()
@@ -15,6 +20,7 @@ const ReadingEntryPage: React.FC = () => {
   
   // Form state
   const [selectedMeter, setSelectedMeter] = useState('main-house')
+  const [readingType, setReadingType] = useState<'mandatory' | 'mini'>('mini')
   const [reading, setReading] = useState('')
   const [date, setDate] = useState(new Date().toISOString().split('T')[0])
   const [notes, setNotes] = useState('')
@@ -124,8 +130,12 @@ const ReadingEntryPage: React.FC = () => {
 
   const selectedMeterData = meters.find(m => m.id === selectedMeter)
   const calculatedUsage = selectedMeterData && reading ? 
-    Math.max(0, parseInt(reading) - (selectedMeterData.lastReading || 0)) : 0
-  const estimatedCost = calculatedUsage * 19.3 // Rs 19.3 per kWh average
+    calculateUsage(parseInt(reading), selectedMeterData.lastReading || 0) : 0
+  
+  // Calculate projected monthly usage for warnings
+  const currentDate = new Date()
+  const daysElapsed = currentDate.getDate()
+  const projectedMonthlyUsage = calculatedUsage > 0 ? (calculatedUsage / daysElapsed) * 30 : 0
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -285,6 +295,12 @@ const ReadingEntryPage: React.FC = () => {
                       </div>
                     </div>
 
+                    {/* Reading Type Selection */}
+                    <ReadingTypeSelector
+                      selectedType={readingType}
+                      onTypeChange={setReadingType}
+                    />
+
                     {/* Meter Selection */}
                     <div className="space-y-4">
                       <label className="text-lg font-semibold text-foreground">Select Meter</label>
@@ -379,43 +395,25 @@ const ReadingEntryPage: React.FC = () => {
                     </div>
 
                     {/* Usage Calculation */}
-                    {reading && selectedMeterData && (
-                      <Card className="bg-gradient-to-r from-primary/5 via-accent-blue/5 to-accent-purple/5 border border-primary/20">
-                        <div className="space-y-4">
-                          <h3 className="font-semibold text-foreground flex items-center space-x-2">
-                            <TrendingUp className="h-5 w-5 text-primary" />
-                            <span>Usage Calculation</span>
-                          </h3>
-                          <div className="grid grid-cols-4 gap-4 text-center">
-                            <div className="space-y-2">
-                              <p className="text-foreground-tertiary text-sm">Previous</p>
-                              <p className="font-bold text-foreground text-xl font-mono">
-                                {selectedMeterData.lastReading ? selectedMeterData.lastReading.toLocaleString() : '0'}
-                              </p>
-                            </div>
-                            <div className="space-y-2">
-                              <p className="text-foreground-tertiary text-sm">Current</p>
-                              <p className="font-bold text-foreground text-xl font-mono">{parseInt(reading).toLocaleString()}</p>
-                            </div>
-                            <div className="space-y-2">
-                              <p className="text-foreground-tertiary text-sm">Usage</p>
-                              <p className="font-bold text-primary text-xl font-mono">{calculatedUsage} kWh</p>
-                            </div>
-                            <div className="space-y-2">
-                              <p className="text-foreground-tertiary text-sm">Est. Cost</p>
-                              <p className="font-bold text-accent-amber text-xl font-mono">Rs {Math.round(estimatedCost).toLocaleString()}</p>
-                            </div>
-                          </div>
-                          {calculatedUsage > 0 && (
-                            <div className="pt-4 border-t border-border/30">
-                              <div className="flex items-center justify-between text-sm">
-                                <span className="text-foreground-secondary">Daily Average:</span>
-                                <span className="font-semibold text-foreground">{(calculatedUsage / 30).toFixed(1)} kWh/day</span>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      </Card>
+                    {reading && selectedMeterData && calculatedUsage > 0 && (
+                      <div className="space-y-6">
+                        {/* Slab Warning Alert */}
+                        <SlabWarningAlert units={calculatedUsage} />
+                        
+                        {/* Cost Breakdown */}
+                        <CostBreakdownCard
+                          units={calculatedUsage}
+                          title="Estimated Cost Breakdown"
+                          showProjection={readingType === 'mini'}
+                          projectedUnits={readingType === 'mini' ? projectedMonthlyUsage : undefined}
+                        />
+                        
+                        {/* Slab Progress Indicator */}
+                        <SlabProgressIndicator
+                          currentUnits={calculatedUsage}
+                          projectedUnits={readingType === 'mini' ? projectedMonthlyUsage : undefined}
+                        />
+                      </div>
                     )}
 
                     {/* Notes */}
@@ -447,7 +445,7 @@ const ReadingEntryPage: React.FC = () => {
                       disabled={submitting || !selectedMeter || !reading || meters.length === 0}
                     >
                       <Save className="h-6 w-6 mr-3" />
-                      {submitting ? 'Saving...' : 'Save Reading Entry'}
+                      {submitting ? 'Saving...' : `Save ${readingType === 'mandatory' ? 'End-of-Month' : 'Mini'} Reading`}
                     </Button>
                   </form>
                 </Card>

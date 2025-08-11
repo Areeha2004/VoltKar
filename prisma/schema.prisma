@@ -8,24 +8,18 @@ datasource db {
   url          = env("DATABASE_URL")
   directUrl    = env("DIRECT_URL") // <--- add this line
 }
-
-
-
 model User {
   id            String    @id @default(cuid())
   name          String?
   email         String?   @unique
   emailVerified DateTime?
   image         String?
-  password      String? // nullable for OAuth users
+  password      String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  // NextAuth required relations
-  accounts Account[]
-  sessions Session[]
-
-  // Your app-specific relations
+  accounts          Account[]
+  sessions          Session[]
   meters            Meter[]
   appliances        Appliance[]
   challenges        UserChallenge[]
@@ -40,8 +34,8 @@ model User {
 model Meter {
   id        String   @id @default(uuid())
   userId    String
-  label     String // e.g. Home, Office, Solar
-  type      String // optional future field
+  label     String
+  type      String? // e.g. Home, Office, Solar, Sub-meter
   createdAt DateTime @default(now())
 
   user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -52,15 +46,18 @@ model MeterReading {
   id        String   @id @default(uuid())
   meterId   String
   userId    String
-  reading   Float
+  reading   Float       // The actual meter reading value
+  week      Int         // 1–5 for weekly readings
   month     Int
   year      Int
-  createdAt DateTime @default(now())
-  date      DateTime @default(now())
-
-  usage         Float?   
-  estimatedCost Int?     
+  date      DateTime    @default(now())
+  createdAt DateTime    @default(now())
+  
+  lastReading   Decimal?  // Value from previous week/month
+  usage         Float?    // kWh consumed since last reading
+  estimatedCost Float?    // Cached for speed
   notes         String?
+
   meter Meter @relation(fields: [meterId], references: [id], onDelete: Cascade)
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
  
@@ -69,13 +66,14 @@ model MeterReading {
 
 model Tariff {
   id           String   @id @default(uuid())
-  disco        String // LESCO, GEPCO, etc.
+  disco        String   // e.g., LESCO, GEPCO
   slabMin      Float
   slabMax      Float?
   rate         Float
   fuelAdj      Float
   fixedCharges Float
   taxPercent   Float
+  tvFee        Float?   // New field for TV fee
   updatedAt    DateTime @updatedAt
 }
 
@@ -84,6 +82,7 @@ model Forecast {
   userId        String
   month         Int
   year          Int
+  week          Int?     // Optional for partial-month forecasts
   projectedKwh  Float
   estimatedBill Float
   createdAt     DateTime @default(now())
@@ -94,7 +93,7 @@ model Forecast {
 model Appliance {
   id           String   @id @default(uuid())
   userId       String
-  name         String // e.g., "AC 1.5 ton"
+  name         String
   wattage      Float
   hoursPerDay  Float
   daysPerMonth Int
@@ -116,6 +115,8 @@ model AnomalyDetection {
   user    User         @relation(fields: [userId], references: [id])
   reading MeterReading @relation(fields: [readingId], references: [id])
 }
+
+
 
 model UserChallenge {
   id          String  @id @default(uuid())

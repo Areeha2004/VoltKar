@@ -57,23 +57,37 @@ export async function GET(request: NextRequest) {
         const usage = Math.max(0, reading.reading - previousReading.reading)
         currentUsage += usage
         
-        // Calculate proper cost using slab structure
-        const costBreakdown = calculateElectricityBill(usage)
-        // Use stored cost if available, otherwise calculate
-        const cost = reading.estimatedCost || costBreakdown.totalCost
-        totalEstimatedCost += cost
+        // Always use calculated cost for accuracy
+        if (usage > 0) {
+          const costBreakdown = calculateElectricityBill(usage)
+          const cost = costBreakdown.totalCost
+          totalEstimatedCost += cost
+          
+          // Update stored cost if different
+          if (reading.estimatedCost !== Math.round(cost)) {
+            await prisma.meterReading.update({
+              where: { id: reading.id },
+              data: { 
+                usage,
+                estimatedCost: Math.round(cost)
+              }
+            })
+          }
         
-        // Check for slab warnings
-        const warningMessage = getSlabWarningMessage(usage)
-        if (warningMessage) {
-          hasSlabWarnings = true
-          slabWarnings.push(`${reading.meter.label}: ${warningMessage}`)
+          // Check for slab warnings
+          const warningMessage = getSlabWarningMessage(usage)
+          if (warningMessage) {
+            hasSlabWarnings = true
+            slabWarnings.push(`${reading.meter.label}: ${warningMessage}`)
+          }
         }
       }
     }
 
     // Calculate last month usage for comparison
     let lastMonthUsage = 0
+    let lastMonthCost = 0
+    
     for (const reading of lastMonthReadings) {
       const previousReading = await prisma.meterReading.findFirst({
         where: {
@@ -86,12 +100,21 @@ export async function GET(request: NextRequest) {
       if (previousReading) {
         const usage = Math.max(0, reading.reading - previousReading.reading)
         lastMonthUsage += usage
+        
+        if (usage > 0) {
+          const costBreakdown = calculateElectricityBill(usage)
+          lastMonthCost += costBreakdown.totalCost
+        }
       }
     }
 
     // Calculate changes
     const usageChange = lastMonthUsage > 0 
       ? ((currentUsage - lastMonthUsage) / lastMonthUsage * 100).toFixed(1)
+      : '0'
+       
+    const costChange = lastMonthCost > 0 
+      ? ((totalEstimatedCost - lastMonthCost) / lastMonthCost * 100).toFixed(1)
       : '0'
 
     // Get total meters count
@@ -144,6 +167,7 @@ export async function GET(request: NextRequest) {
         costToDate: Math.round(totalEstimatedCost * 0.8), // Estimated based on days elapsed
         efficiencyScore: Math.round(efficiencyScore),
         usageChange: `${parseFloat(usageChange) > 0 ? '+' : ''}${usageChange}%`,
+        costChange: `${parseFloat(costChange) > 0 ? '+' : ''}${costChange}%`,
         metersCount,
         hasSlabWarnings,
         avgCostPerKwh: currentUsage > 0 ? Math.round((totalEstimatedCost / currentUsage) * 100) / 100 : 0
@@ -156,14 +180,19 @@ export async function GET(request: NextRequest) {
             orderBy: { createdAt: 'desc' }
           })
           const usage = prev ? Math.max(0, reading.reading - prev.reading) : 0
-          const costBreakdown = calculateElectricityBill(usage)
+          let cost = 0
+          if (usage > 0) {
+            const costBreakdown = calculateElectricityBill(usage)
+            cost = costBreakdown.totalCost
+          }
           
           return {
             date: reading.createdAt.toISOString().split('T')[0],
             meter: reading.meter.label,
             reading: reading.reading,
             usage,
-            cost: Math.round(costBreakdown.totalCost)
+            cost: Math.round(cost),
+            estimatedCost: Math.round(cost)
           }
         })
       )

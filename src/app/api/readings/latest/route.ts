@@ -1,3 +1,5 @@
+// app/api/readings/latest/route.ts
+
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '../../auth/[...nextauth]/route'
@@ -7,79 +9,62 @@ import { calculateElectricityBill } from '@/lib/slabCalculations'
 export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
-    
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Get all meters for the user
     const meters = await prisma.meter.findMany({
-      where: {
-        userId: session.user.id
-      }
+      where: { userId: session.user.id },
     })
 
-    // Get latest reading for each meter
     const latestReadings = await Promise.all(
       meters.map(async (meter) => {
-        const latestReading = await prisma.meterReading.findFirst({
-          where: {
-            meterId: meter.id
-          },
+        const latest = await prisma.meterReading.findFirst({
+          where: { meterId: meter.id },
           orderBy: { createdAt: 'desc' },
-          include: {
-            meter: true
-          }
+          include: { meter: true },
         })
 
-        if (!latestReading) {
+        if (!latest) {
           return {
             meterId: meter.id,
             meterName: meter.label,
             reading: null,
             date: null,
             usage: 0,
-            cost: 0
+            estimatedCost: 0,
           }
         }
 
-        // Calculate usage from previous reading
-        const previousReading = await prisma.meterReading.findFirst({
-          where: {
-            meterId: meter.id,
-            createdAt: { lt: latestReading.createdAt }
-          },
-          orderBy: { createdAt: 'desc' }
+        const prev = await prisma.meterReading.findFirst({
+          where: { meterId: meter.id, createdAt: { lt: latest.createdAt } },
+          orderBy: { createdAt: 'desc' },
         })
 
-        const usage = previousReading 
-          ? Math.max(0, latestReading.reading - previousReading.reading)
-          : 0
+        const baseValue = prev?.reading ?? meter.lastReading ?? 0
+        const usage = Math.max(0, latest.reading - baseValue)
 
-        // Use stored cost if available, otherwise calculate
-        let estimatedCost = latestReading.estimatedCost
+        let estimatedCost = latest.estimatedCost
         let costBreakdown = null
-        
-        if (!estimatedCost && usage > 0) {
+
+        // recalc if missing or out-of-sync
+        if ((!estimatedCost || usage !== latest.usage) && usage > 0) {
           costBreakdown = calculateElectricityBill(usage)
           estimatedCost = Math.round(costBreakdown.totalCost)
-          
-          // Update the reading with calculated cost if it wasn't stored
+
+          // persist fix
           await prisma.meterReading.update({
-            where: { id: latestReading.id },
-            data: { 
-              usage,
-              estimatedCost 
-            }
+            where: { id: latest.id },
+            data: { usage, estimatedCost },
           })
         }
 
         return {
-          ...latestReading,
+          ...latest,
           usage,
-          estimatedCost: estimatedCost || 0,
+          estimatedCost,
           slabWarning: costBreakdown?.slabWarning || false,
-          costBreakdown: costBreakdown
+          costBreakdown,
         }
       })
     )

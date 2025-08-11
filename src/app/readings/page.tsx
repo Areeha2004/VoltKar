@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
-import { Calendar, Home, Save, History, Plus, Zap, TrendingUp, Clock, CheckCircle, AlertCircle, Camera, Upload } from 'lucide-react'
+import { Calendar, Home, Save, History, Plus, Zap, TrendingUp, Clock, CheckCircle, AlertCircle, Camera, Upload, RefreshCw } from 'lucide-react'
 import Navbar from '../../components/layout/Navbar'
 import Sidebar from '../../components/layout/Sidebar'
 import Card from '../../components/ui/Card'
@@ -12,7 +12,7 @@ import SlabProgressIndicator from '../../components/readings/SlabProgressIndicat
 import CostBreakdownCard from '../../components/readings/CostBreakdownCard'
 import ReadingTypeSelector from '../../components/readings/ReadingTypeSelector'
 import SlabWarningAlert from '../../components/ui/SlabWarningAlert'
-import { calculateUsage, projectMonthlyCost } from '../../lib/slabCalculations'
+import { calculateUsage, projectMonthlyCost, calculateElectricityBill } from '../../lib/slabCalculations'
 
 const ReadingEntryPage: React.FC = () => {
   const { data: session } = useSession()
@@ -33,6 +33,7 @@ const ReadingEntryPage: React.FC = () => {
   const [recentReadings, setRecentReadings] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
 
   // Fetch meters and readings
   useEffect(() => {
@@ -40,6 +41,7 @@ const ReadingEntryPage: React.FC = () => {
     if (!session?.user?.id) return;
     try {
       setLoading(true);
+      setError(null);
 
       const metersResponse = await fetch('/api/meters');
       if (!metersResponse.ok) throw new Error('Failed to fetch meters');
@@ -49,15 +51,8 @@ const ReadingEntryPage: React.FC = () => {
       if (!readingsResponse.ok) throw new Error('Failed to fetch readings');
       const readingsData = await readingsResponse.json();
 
-      const readingsWithCalc = readingsData.readings.map((r: any, i: number, arr: any[]) => {
-        const prev = arr[i + 1]; // next item in array is older reading
-        const usage = prev ? Math.max(0, r.reading - prev.reading) : 0;
-        const estimatedCost = usage * 19.3;
-        return { ...r, usage, estimatedCost };
-      });
-
       setMeters(metersData.meters || []);
-      setRecentReadings(readingsWithCalc);
+      setRecentReadings(readingsData.readings || []);
 
       if (metersData.meters && metersData.meters.length > 0) {
         setSelectedMeter(metersData.meters[0].id);
@@ -74,6 +69,21 @@ const ReadingEntryPage: React.FC = () => {
 
   fetchData();
 }, [session?.user?.id]);
+
+  // Refresh readings data
+  const refreshReadings = async () => {
+    try {
+      setRefreshing(true);
+      const readingsResponse = await fetch('/api/readings?limit=10');
+      if (!readingsResponse.ok) throw new Error('Failed to fetch readings');
+      const readingsData = await readingsResponse.json();
+      setRecentReadings(readingsData.readings || []);
+    } catch (err) {
+      console.error('Failed to refresh readings:', err);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -112,7 +122,11 @@ const ReadingEntryPage: React.FC = () => {
     }
 
     const data = await response.json()
-    setRecentReadings(prev => [data.reading, ...prev.slice(0, 9)])
+    
+    // Add the new reading to the top of the list
+    setRecentReadings(prev => [data.reading, ...prev.slice(0, 9)]);
+    
+    // Update the meter's last reading
 
     setMeters(ms => ms.map(m => m.id === selectedMeter ? { ...m, lastReading: parseFloat(reading) } : m))
 
@@ -120,7 +134,10 @@ const ReadingEntryPage: React.FC = () => {
     setNotes('')
     setDate(new Date().toISOString().split('T')[0])
 
-    alert('Reading submitted successfully!')
+    // Show success message
+    const successMsg = `Reading submitted successfully! Usage: ${data.reading.usage || 0} kWh, Cost: Rs ${(data.reading.estimatedCost || 0).toLocaleString()}`;
+    alert(successMsg);
+    
   } catch (err) {
     setSubmitError(err instanceof Error ? err.message : 'Failed to submit reading')
   } finally {
@@ -129,8 +146,10 @@ const ReadingEntryPage: React.FC = () => {
 }
 
   const selectedMeterData = meters.find(m => m.id === selectedMeter)
-  const calculatedUsage = selectedMeterData && reading ? 
-    calculateUsage(parseInt(reading), selectedMeterData.lastReading || 0) : 0
+  
+  // Calculate usage and cost for preview
+  const calculatedUsage = selectedMeterData && reading ? calculateUsage(parseInt(reading), selectedMeterData.lastReading || 0) : 0;
+  const calculatedCost = calculatedUsage > 0 ? calculateElectricityBill(calculatedUsage) : null;
   
   // Calculate projected monthly usage for warnings
   const currentDate = new Date()
@@ -229,7 +248,7 @@ const ReadingEntryPage: React.FC = () => {
                 },
                 { 
                   title: 'This Month', 
-                  value: '890', 
+                  value: recentReadings.length > 0 ? Math.round(recentReadings.reduce((sum, r) => sum + (r.usage || 0), 0)).toString() : '0',
                   unit: 'kWh',
                   icon: Zap, 
                   gradient: 'from-accent-blue to-accent-purple',
@@ -247,7 +266,7 @@ const ReadingEntryPage: React.FC = () => {
                 },
                 { 
                   title: 'Avg. Daily', 
-                  value: '28.7', 
+                  value: recentReadings.length > 0 ? (recentReadings.reduce((sum, r) => sum + (r.usage || 0), 0) / 30).toFixed(1) : '0',
                   unit: 'kWh',
                   icon: TrendingUp, 
                   gradient: 'from-accent-emerald to-primary',
@@ -395,7 +414,7 @@ const ReadingEntryPage: React.FC = () => {
                     </div>
 
                     {/* Usage Calculation */}
-                    {reading && selectedMeterData && calculatedUsage > 0 && (
+                    {reading && selectedMeterData && calculatedUsage > 0 && calculatedCost && (
                       <div className="space-y-6">
                         {/* Slab Warning Alert */}
                         <SlabWarningAlert units={calculatedUsage} />
@@ -403,7 +422,7 @@ const ReadingEntryPage: React.FC = () => {
                         {/* Cost Breakdown */}
                         <CostBreakdownCard
                           units={calculatedUsage}
-                          title="Estimated Cost Breakdown"
+                          title={`Estimated Cost Breakdown (${calculatedUsage} kWh)`}
                           showProjection={readingType === 'mini'}
                           projectedUnits={readingType === 'mini' ? projectedMonthlyUsage : undefined}
                         />
@@ -413,6 +432,16 @@ const ReadingEntryPage: React.FC = () => {
                           currentUnits={calculatedUsage}
                           projectedUnits={readingType === 'mini' ? projectedMonthlyUsage : undefined}
                         />
+                      </div>
+                    )}
+                    
+                    {/* Usage Preview */}
+                    {reading && selectedMeterData && calculatedUsage > 0 && (
+                      <div className="p-4 rounded-2xl bg-primary/10 border border-primary/20">
+                        <div className="flex justify-between items-center">
+                          <span className="text-foreground-secondary">Calculated Usage:</span>
+                          <span className="font-bold text-primary">{calculatedUsage} kWh</span>
+                        </div>
                       </div>
                     )}
 
@@ -463,6 +492,13 @@ const ReadingEntryPage: React.FC = () => {
                       <p className="text-foreground-secondary text-sm">Latest entries</p>
                     </div>
                   </div>
+                  
+                  <div className="flex justify-end">
+                    <Button variant="ghost" size="sm" onClick={refreshReadings} disabled={refreshing}>
+                      <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+                      {refreshing ? 'Refreshing...' : 'Refresh'}
+                    </Button>
+                  </div>
 
                   <div className="space-y-4">
                     {recentReadings.length > 0 ? recentReadings.map((entry, index) => (
@@ -480,15 +516,15 @@ const ReadingEntryPage: React.FC = () => {
                         <div className="grid grid-cols-3 gap-3 text-sm">
                           <div>
                             <p className="text-foreground-tertiary">Reading</p>
-                            <p className="font-semibold text-foreground font-mono">{entry.reading.toLocaleString()}</p>
+                            <p className="font-semibold text-foreground font-mono">{entry.reading?.toLocaleString() || 'N/A'}</p>
                           </div>
                           <div>
                             <p className="text-foreground-tertiary">Usage</p>
-                            <p className="font-semibold text-foreground">{entry.usage || 0} kWh</p>
+                            <p className="font-semibold text-foreground">{entry.usage?.toFixed(1) || '0'} kWh</p>
                           </div>
                           <div>
                             <p className="text-foreground-tertiary">Cost</p>
-                            <p className="font-semibold text-primary">Rs {(entry.estimatedCost || 0).toLocaleString()}</p>
+                            <p className="font-semibold text-primary">Rs {Math.round(entry.estimatedCost || 0).toLocaleString()}</p>
                           </div>
                         </div>
 

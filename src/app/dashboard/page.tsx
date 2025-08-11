@@ -360,7 +360,7 @@ const [alerts, setAlerts] = useState<any[]>([]);
                           <td className="py-4 px-6 text-foreground">{reading.meter}</td>
                           <td className="py-4 px-6 text-foreground font-mono">{reading.reading?.toLocaleString() || '0'}</td>
                           <td className="py-4 px-6 text-foreground font-mono">{reading.usage} kWh</td>
-                          <td className="py-4 px-6 text-primary font-mono font-semibold">Rs {reading.cost?.toLocaleString() || '0'}</td>
+                          <td className="py-4 px-6 text-primary font-mono font-semibold">Rs {(reading.cost || reading.estimatedCost || 0).toLocaleString()}</td>
                         </tr>
                       ))}
                     </tbody>

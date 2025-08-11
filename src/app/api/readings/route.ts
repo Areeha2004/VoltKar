@@ -38,7 +38,7 @@ export async function GET(request: NextRequest) {
         return { 
           ...reading,
           usage,
-          estimatedCost: Math.round(costBreakdown.totalCost),
+          estimatedCost: reading.estimatedCost || Math.round(costBreakdown.totalCost),
           slabWarning: costBreakdown.slabWarning,
           costBreakdown
         }
@@ -98,6 +98,7 @@ export async function POST(request: NextRequest) {
       },
       include: { meter: true }
     })
+    
     return NextResponse.json({
       reading: {
         ...updatedReading,

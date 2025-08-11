@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '../../auth/[...nextauth]/route'
 import prisma from '@/lib/prisma'
+import { calculateElectricityBill } from '@/lib/slabCalculations'
 
 export async function GET(request: NextRequest) {
   try {
@@ -55,12 +56,15 @@ export async function GET(request: NextRequest) {
           ? Math.max(0, latestReading.reading - previousReading.reading)
           : 0
 
-        const estimatedCost = usage * 19.3 // Average rate
+        const costBreakdown = calculateElectricityBill(usage)
+        const estimatedCost = Math.round(costBreakdown.totalCost)
 
         return {
           ...latestReading,
           usage,
-          estimatedCost: Math.round(estimatedCost)
+          estimatedCost: latestReading.estimatedCost || estimatedCost,
+          slabWarning: costBreakdown.slabWarning,
+          costBreakdown
         }
       })
     )

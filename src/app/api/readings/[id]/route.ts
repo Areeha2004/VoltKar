@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '../../auth/[...nextauth]/route'
 import prisma from '@/lib/prisma'
+import { calculateElectricityBill } from '@/lib/slabCalculations'
 
 export async function PUT(
   request: NextRequest,
@@ -34,7 +35,8 @@ export async function PUT(
       data: {
         reading: parseFloat(reading),
         month,
-        year
+        year,
+        notes: notes?.trim() || null
       },
       include: {
         meter: true
@@ -54,13 +56,25 @@ export async function PUT(
       ? Math.max(0, updatedReading.reading - previousReading.reading)
       : 0
 
-    const estimatedCost = usage * 19.3
+    const costBreakdown = calculateElectricityBill(usage)
+    const estimatedCost = Math.round(costBreakdown.totalCost)
+
+    // Update the reading with calculated values
+    await prisma.meterReading.update({
+      where: { id: readingId },
+      data: {
+        usage,
+        estimatedCost
+      }
+    })
 
     return NextResponse.json({ 
       reading: {
         ...updatedReading,
         usage,
-        estimatedCost: Math.round(estimatedCost)
+        estimatedCost,
+        slabWarning: costBreakdown.slabWarning,
+        costBreakdown
       }
     })
   } catch (error) {

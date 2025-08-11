@@ -59,7 +59,9 @@ export async function GET(request: NextRequest) {
         
         // Calculate proper cost using slab structure
         const costBreakdown = calculateElectricityBill(usage)
-        totalEstimatedCost += costBreakdown.totalCost
+        // Use stored cost if available, otherwise calculate
+        const cost = reading.estimatedCost || costBreakdown.totalCost
+        totalEstimatedCost += cost
         
         // Check for slab warnings
         const warningMessage = getSlabWarningMessage(usage)

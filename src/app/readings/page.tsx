@@ -488,7 +488,7 @@ const ReadingEntryPage: React.FC = () => {
                           </div>
                           <div>
                             <p className="text-foreground-tertiary">Cost</p>
-                            <p className="font-semibold text-primary">Rs {entry.estimatedCost ? entry.estimatedCost.toLocaleString() : '0'}</p>
+                            <p className="font-semibold text-primary">Rs {(entry.estimatedCost || 0).toLocaleString()}</p>
                           </div>
                         </div>
 

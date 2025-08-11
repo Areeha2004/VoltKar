@@ -56,10 +56,14 @@ model MeterReading {
   month     Int
   year      Int
   createdAt DateTime @default(now())
+  date      DateTime @default(now())
 
+  usage         Float?   
+  estimatedCost Int?     
+  notes         String?
   meter Meter @relation(fields: [meterId], references: [id], onDelete: Cascade)
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
-
+ 
   anomalyDetections AnomalyDetection[]
 }
 

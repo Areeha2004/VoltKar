@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "public"."MeterReading" ADD COLUMN     "date" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ADD COLUMN     "estimatedCost" INTEGER,
+ADD COLUMN     "notes" TEXT,
+ADD COLUMN     "usage" DOUBLE PRECISION;

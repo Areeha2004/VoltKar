@@ -1,5 +1,7 @@
 'use client'
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
+import { useSession } from 'next-auth/react'
+import { useRouter } from 'next/navigation'
 import { Calendar, Home, Save, History, Plus, Zap, TrendingUp, Clock, CheckCircle, AlertCircle, Camera, Upload } from 'lucide-react'
 import Navbar from '../../components/layout/Navbar'
 import Sidebar from '../../components/layout/Sidebar'
@@ -8,86 +10,129 @@ import Button from '../../components/ui/Button'
 import Input from '../../components/ui/Input'
 
 const ReadingEntryPage: React.FC = () => {
+  const { data: session } = useSession()
+  const router = useRouter()
+  
+  // Form state
   const [selectedMeter, setSelectedMeter] = useState('main-house')
   const [reading, setReading] = useState('')
   const [date, setDate] = useState(new Date().toISOString().split('T')[0])
   const [notes, setNotes] = useState('')
   const [photoMode, setPhotoMode] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  
+  // Data state
+  const [meters, setMeters] = useState<any[]>([])
+  const [recentReadings, setRecentReadings] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  const meters = [
-    { 
-      id: 'main-house', 
-      name: 'Main House', 
-      type: 'Single Phase', 
-      lastReading: 15420,
-      lastDate: '2024-01-10',
-      status: 'active',
-      location: 'Ground Floor'
-    },
-    { 
-      id: 'guest-house', 
-      name: 'Guest House', 
-      type: 'Single Phase', 
-      lastReading: 8750,
-      lastDate: '2024-01-08',
-      status: 'active',
-      location: 'Separate Building'
+  // Fetch meters and readings
+  useEffect(() => {
+  const fetchData = async () => {
+    if (!session?.user?.id) return;
+    try {
+      setLoading(true);
+
+      const metersResponse = await fetch('/api/meters');
+      if (!metersResponse.ok) throw new Error('Failed to fetch meters');
+      const metersData = await metersResponse.json();
+
+      const readingsResponse = await fetch('/api/readings?limit=10');
+      if (!readingsResponse.ok) throw new Error('Failed to fetch readings');
+      const readingsData = await readingsResponse.json();
+
+      const readingsWithCalc = readingsData.readings.map((r: any, i: number, arr: any[]) => {
+        const prev = arr[i + 1]; // next item in array is older reading
+        const usage = prev ? Math.max(0, r.reading - prev.reading) : 0;
+        const estimatedCost = usage * 19.3;
+        return { ...r, usage, estimatedCost };
+      });
+
+      setMeters(metersData.meters || []);
+      setRecentReadings(readingsWithCalc);
+
+      if (metersData.meters && metersData.meters.length > 0) {
+        setSelectedMeter(metersData.meters[0].id);
+      }
+
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load data');
+      console.error('Data fetch error:', err);
+    } finally {
+      setLoading(false);
     }
-  ]
+  };
 
-  const recentReadings = [
-    { 
-      date: '2024-01-15', 
-      meter: 'Main House', 
-      reading: 15420, 
-      usage: 180, 
-      cost: 3200, 
-      status: 'verified',
-      efficiency: 'good'
-    },
-    { 
-      date: '2024-01-10', 
-      meter: 'Main House', 
-      reading: 15240, 
-      usage: 165, 
-      cost: 2950, 
-      status: 'verified',
-      efficiency: 'excellent'
-    },
-    { 
-      date: '2024-01-05', 
-      meter: 'Guest House', 
-      reading: 8750, 
-      usage: 95, 
-      cost: 1700, 
-      status: 'pending',
-      efficiency: 'good'
-    },
-    { 
-      date: '2024-01-01', 
-      meter: 'Main House', 
-      reading: 15075, 
-      usage: 155, 
-      cost: 2780, 
-      status: 'verified',
-      efficiency: 'fair'
-    },
-  ]
+  fetchData();
+}, [session?.user?.id]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    console.log({ selectedMeter, reading, date, notes })
+    submitReading()
   }
+
+ const submitReading = async () => {
+  if (!selectedMeter || !reading || !date) {
+    setSubmitError('Please fill in all required fields')
+    return
+  }
+
+  try {
+    setSubmitting(true)
+    setSubmitError(null)
+
+    const readingDate = new Date(date)
+    const month = readingDate.getMonth() + 1
+    const year = readingDate.getFullYear()
+
+    const response = await fetch('/api/readings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        meterId: selectedMeter,
+        reading: parseFloat(reading),
+        month,
+        year,
+        notes: notes.trim() || undefined,
+      }),
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json()
+      throw new Error(errorData.error || 'Failed to submit reading')
+    }
+
+    const data = await response.json()
+    setRecentReadings(prev => [data.reading, ...prev.slice(0, 9)])
+
+    setMeters(ms => ms.map(m => m.id === selectedMeter ? { ...m, lastReading: parseFloat(reading) } : m))
+
+    setReading('')
+    setNotes('')
+    setDate(new Date().toISOString().split('T')[0])
+
+    alert('Reading submitted successfully!')
+  } catch (err) {
+    setSubmitError(err instanceof Error ? err.message : 'Failed to submit reading')
+  } finally {
+    setSubmitting(false)
+  }
+}
 
   const selectedMeterData = meters.find(m => m.id === selectedMeter)
   const calculatedUsage = selectedMeterData && reading ? 
-    Math.max(0, parseInt(reading) - selectedMeterData.lastReading) : 0
+    Math.max(0, parseInt(reading) - (selectedMeterData.lastReading || 0)) : 0
   const estimatedCost = calculatedUsage * 19.3 // Rs 19.3 per kWh average
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case 'verified': return <CheckCircle className="h-4 w-4 text-primary" />
-      case 'pending': return <Clock className="h-4 w-4 text-accent-amber" />
+      case 'verified': 
+      case 'active': return <CheckCircle className="h-4 w-4 text-primary" />
+      case 'pending': 
+      case 'inactive': return <Clock className="h-4 w-4 text-accent-amber" />
       default: return <AlertCircle className="h-4 w-4 text-foreground-tertiary" />
     }
   }
@@ -99,6 +144,29 @@ const ReadingEntryPage: React.FC = () => {
       case 'fair': return 'text-accent-amber bg-accent-amber/10'
       default: return 'text-foreground-secondary bg-background-secondary'
     }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navbar />
+        <div className="flex">
+          <Sidebar />
+          <main className="flex-1 p-8">
+            <div className="max-w-7xl mx-auto">
+              <div className="animate-pulse space-y-8">
+                <div className="h-8 bg-background-card rounded w-1/3"></div>
+                <div className="grid md:grid-cols-4 gap-6">
+                  {[1, 2, 3, 4].map(i => (
+                    <div key={i} className="h-32 bg-background-card rounded-2xl"></div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </main>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -132,6 +200,10 @@ const ReadingEntryPage: React.FC = () => {
                   <Camera className="h-5 w-5 mr-2" />
                   {photoMode ? 'Manual Entry' : 'Photo Capture'}
                 </Button>
+                <Button variant="outline" onClick={() => router.push('/meters')}>
+                  <Home className="h-5 w-5 mr-2" />
+                  Manage Meters
+                </Button>
               </div>
             </div>
 
@@ -155,11 +227,13 @@ const ReadingEntryPage: React.FC = () => {
                 },
                 { 
                   title: 'Last Reading', 
-                  value: '3', 
-                  unit: 'days ago',
+                  value: recentReadings.length > 0 ? 
+                    Math.ceil((Date.now() - new Date(recentReadings[0].createdAt).getTime()) / (1000 * 60 * 60 * 24)).toString() : 
+                    'No',
+                  unit: recentReadings.length > 0 ? 'days ago' : 'readings',
                   icon: Clock, 
                   gradient: 'from-accent-amber to-accent-pink',
-                  description: 'Main house meter'
+                  description: recentReadings.length > 0 ? recentReadings[0].meter.label : 'Add first reading'
                 },
                 { 
                   title: 'Avg. Daily', 
@@ -214,40 +288,60 @@ const ReadingEntryPage: React.FC = () => {
                     {/* Meter Selection */}
                     <div className="space-y-4">
                       <label className="text-lg font-semibold text-foreground">Select Meter</label>
-                      <div className="grid md:grid-cols-2 gap-4">
-                        {meters.map((meter) => (
+                      {meters.length > 0 ? (
+                        <div className="grid md:grid-cols-2 gap-4">
+                          {meters.map((meter) => (
+                            <button
+                              key={meter.id}
+                              type="button"
+                              onClick={() => setSelectedMeter(meter.id)}
+                              className={`p-6 rounded-2xl border-2 transition-all duration-300 text-left group ${
+                                selectedMeter === meter.id
+                                  ? 'border-primary bg-primary/10 shadow-glow'
+                                  : 'border-border hover:border-border-light hover:bg-background-card/50'
+                              }`}
+                            >
+                              <div className="space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <h3 className="font-semibold text-foreground text-lg">{meter.label}</h3>
+                                  <div className={`w-3 h-3 rounded-full ${
+                                    meter.status === 'active' ? 'bg-primary' : 'bg-foreground-tertiary'
+                                  }`} />
+                                </div>
+                                <div className="space-y-2">
+                                  <p className="text-sm text-foreground-secondary">{meter.type}</p>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-sm text-foreground-tertiary">Last Reading:</span>
+                                    <span className="font-mono font-semibold text-foreground">
+                                      {meter.lastReading ? meter.lastReading.toLocaleString() : 'No readings'}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-sm text-foreground-tertiary">Date:</span>
+                                    <span className="text-sm text-foreground">
+                                      {meter.lastReadingDate ? 
+                                        new Date(meter.lastReadingDate).toLocaleDateString() : 
+                                        'Never'
+                                      }
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-center py-8 border-2 border-dashed border-border rounded-2xl">
+                          <Home className="h-12 w-12 mx-auto text-foreground-tertiary mb-4" />
+                          <p className="text-foreground-secondary mb-4">No meters found</p>
                           <button
-                            key={meter.id}
-                            type="button"
-                            onClick={() => setSelectedMeter(meter.id)}
-                            className={`p-6 rounded-2xl border-2 transition-all duration-300 text-left group ${
-                              selectedMeter === meter.id
-                                ? 'border-primary bg-primary/10 shadow-glow'
-                                : 'border-border hover:border-border-light hover:bg-background-card/50'
-                            }`}
+                            onClick={() => router.push('/meters')}
+                            className="text-primary hover:text-primary-light font-semibold"
                           >
-                            <div className="space-y-3">
-                              <div className="flex items-center justify-between">
-                                <h3 className="font-semibold text-foreground text-lg">{meter.name}</h3>
-                                <div className={`w-3 h-3 rounded-full ${
-                                  meter.status === 'active' ? 'bg-primary' : 'bg-foreground-tertiary'
-                                }`} />
-                              </div>
-                              <div className="space-y-2">
-                                <p className="text-sm text-foreground-secondary">{meter.type} • {meter.location}</p>
-                                <div className="flex items-center justify-between">
-                                  <span className="text-sm text-foreground-tertiary">Last Reading:</span>
-                                  <span className="font-mono font-semibold text-foreground">{meter.lastReading.toLocaleString()}</span>
-                                </div>
-                                <div className="flex items-center justify-between">
-                                  <span className="text-sm text-foreground-tertiary">Date:</span>
-                                  <span className="text-sm text-foreground">{meter.lastDate}</span>
-                                </div>
-                              </div>
-                            </div>
+                            Add your first meter to get started
                           </button>
-                        ))}
-                      </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className="grid md:grid-cols-2 gap-6">
@@ -260,7 +354,7 @@ const ReadingEntryPage: React.FC = () => {
                           onChange={(e) => setDate(e.target.value)}
                           required
                         />
-                        <Calendar className="absolute right-4 top-12 h-5 w-5 text-foreground-tertiary pointer-events-none" />
+                        
                       </div>
 
                       {/* Reading Input */}
@@ -296,7 +390,7 @@ const ReadingEntryPage: React.FC = () => {
                             <div className="space-y-2">
                               <p className="text-foreground-tertiary text-sm">Previous</p>
                               <p className="font-bold text-foreground text-xl font-mono">
-                                {selectedMeterData.lastReading.toLocaleString()}
+                                {selectedMeterData.lastReading ? selectedMeterData.lastReading.toLocaleString() : '0'}
                               </p>
                             </div>
                             <div className="space-y-2">
@@ -336,10 +430,24 @@ const ReadingEntryPage: React.FC = () => {
                       />
                     </div>
 
+                    {/* Error Display */}
+                    {submitError && (
+                      <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/20">
+                        <div className="flex items-center space-x-2">
+                          <AlertCircle className="h-5 w-5 text-red-400" />
+                          <p className="text-red-400">{submitError}</p>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Submit Button */}
-                    <Button type="submit" className="w-full premium-button text-lg py-6">
+                    <Button 
+                      type="submit" 
+                      className="w-full premium-button text-lg py-6"
+                      disabled={submitting || !selectedMeter || !reading || meters.length === 0}
+                    >
                       <Save className="h-6 w-6 mr-3" />
-                      Save Reading Entry
+                      {submitting ? 'Saving...' : 'Save Reading Entry'}
                     </Button>
                   </form>
                 </Card>
@@ -359,14 +467,16 @@ const ReadingEntryPage: React.FC = () => {
                   </div>
 
                   <div className="space-y-4">
-                    {recentReadings.map((entry, index) => (
+                    {recentReadings.length > 0 ? recentReadings.map((entry, index) => (
                       <div key={index} className="p-5 rounded-2xl bg-background-card/30 border border-border/30 space-y-3 hover:bg-background-card/50 transition-all duration-300 animate-fade-in" style={{ animationDelay: `${index * 0.1}s` }}>
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-2">
-                            <span className="font-semibold text-foreground">{entry.meter}</span>
-                            {getStatusIcon(entry.status)}
+                            <span className="font-semibold text-foreground">{entry.meter.label}</span>
+                            {getStatusIcon('verified')}
                           </div>
-                          <span className="text-sm text-foreground-tertiary">{entry.date}</span>
+                          <span className="text-sm text-foreground-tertiary">
+                            {new Date(entry.createdAt).toLocaleDateString()}
+                          </span>
                         </div>
                         
                         <div className="grid grid-cols-3 gap-3 text-sm">
@@ -376,25 +486,35 @@ const ReadingEntryPage: React.FC = () => {
                           </div>
                           <div>
                             <p className="text-foreground-tertiary">Usage</p>
-                            <p className="font-semibold text-foreground">{entry.usage} kWh</p>
+                            <p className="font-semibold text-foreground">{entry.usage || 0} kWh</p>
                           </div>
                           <div>
                             <p className="text-foreground-tertiary">Cost</p>
-                            <p className="font-semibold text-primary">Rs {entry.cost.toLocaleString()}</p>
+                            <p className="font-semibold text-primary">Rs {entry.estimatedCost ? entry.estimatedCost.toLocaleString() : '0'}</p>
                           </div>
                         </div>
 
                         <div className="flex items-center justify-between pt-2 border-t border-border/30">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getEfficiencyColor(entry.efficiency)}`}>
-                            {entry.efficiency} efficiency
+                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getEfficiencyColor('good')}`}>
+                            good efficiency
                           </span>
-                          <span className="text-xs text-foreground-tertiary capitalize">{entry.status}</span>
+                          <span className="text-xs text-foreground-tertiary capitalize">verified</span>
                         </div>
                       </div>
-                    ))}
+                    )) : (
+                      <div className="text-center py-8">
+                        <History className="h-12 w-12 mx-auto text-foreground-tertiary mb-4" />
+                        <p className="text-foreground-secondary">No readings recorded yet</p>
+                        <p className="text-sm text-foreground-tertiary">Submit your first reading to get started</p>
+                      </div>
+                    )}
                   </div>
 
-                  <Button variant="outline" className="w-full">
+                  <Button 
+                    variant="outline" 
+                    className="w-full"
+                    onClick={() => router.push('/analytics')}
+                  >
                     <History className="h-4 w-4 mr-2" />
                     View All Readings
                   </Button>

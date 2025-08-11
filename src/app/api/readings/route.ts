@@ -3,10 +3,18 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '../auth/[...nextauth]/route'
 import prisma from '@/lib/prisma'
 
+// Dummy rates
+const BASE_TARIFF = 19.3 // Rs per kWh
+const TAX_RATE = 0.1 // 10% tax
+
+function calculateCost(usage: number) {
+  const baseCost = usage * BASE_TARIFF
+  return Math.round(baseCost + baseCost * TAX_RATE)
+}
+
 export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
-    
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
@@ -16,46 +24,28 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '10')
     const offset = parseInt(searchParams.get('offset') || '0')
 
-    const where: any = {
-      userId: session.user.id
-    }
-
-    if (meterId) {
-      where.meterId = meterId
-    }
+    const where: any = { userId: session.user.id }
+    if (meterId) where.meterId = meterId
 
     const readings = await prisma.meterReading.findMany({
       where,
-      include: {
-        meter: true
-      },
+      include: { meter: true },
       orderBy: { createdAt: 'desc' },
       take: limit,
       skip: offset
     })
 
-    // Calculate usage for each reading
     const readingsWithUsage = await Promise.all(
       readings.map(async (reading) => {
-        // Get previous reading for usage calculation
-        const previousReading = await prisma.meterReading.findFirst({
-          where: {
-            meterId: reading.meterId,
-            createdAt: { lt: reading.createdAt }
-          },
+        const prev = await prisma.meterReading.findFirst({
+          where: { meterId: reading.meterId, createdAt: { lt: reading.createdAt } },
           orderBy: { createdAt: 'desc' }
         })
-
-        const usage = previousReading 
-          ? Math.max(0, reading.reading - previousReading.reading)
-          : 0
-
-        const estimatedCost = usage * 19.3 // Average rate
-
-        return {
+        const usage = prev ? Math.max(0, reading.reading - prev.reading) : 0
+        return { 
           ...reading,
           usage,
-          estimatedCost: Math.round(estimatedCost)
+          estimatedCost: calculateCost(usage)
         }
       })
     )
@@ -70,79 +60,43 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
-    
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const { meterId, reading, month, year, notes } = await request.json()
-
     if (!meterId || reading === undefined || !month || !year) {
-      return NextResponse.json({ 
-        error: 'MeterId, reading, month, and year are required' 
-      }, { status: 400 })
+      return NextResponse.json({ error: 'MeterId, reading, month, and year are required' }, { status: 400 })
     }
 
-    // Verify meter belongs to user
     const meter = await prisma.meter.findFirst({
-      where: {
-        id: meterId,
-        userId: session.user.id
-      }
+      where: { id: meterId, userId: session.user.id }
     })
+    if (!meter) return NextResponse.json({ error: 'Meter not found' }, { status: 404 })
 
-    if (!meter) {
-      return NextResponse.json({ error: 'Meter not found' }, { status: 404 })
-    }
-
-    // Check for duplicate reading for same month/year
     const existingReading = await prisma.meterReading.findFirst({
-      where: {
-        meterId,
-        month,
-        year
-      }
+      where: { meterId, month, year }
     })
-
     if (existingReading) {
-      return NextResponse.json({ 
-        error: 'Reading for this month already exists' 
-      }, { status: 409 })
+      return NextResponse.json({ error: 'Reading for this month already exists' }, { status: 409 })
     }
 
     const newReading = await prisma.meterReading.create({
-      data: {
-        meterId,
-        userId: session.user.id,
-        reading: parseFloat(reading),
-        month,
-        year
-      },
-      include: {
-        meter: true
-      }
+      data: { meterId, userId: session.user.id, reading: parseFloat(reading), month, year },
+      include: { meter: true }
     })
 
-    // Calculate usage
-    const previousReading = await prisma.meterReading.findFirst({
-      where: {
-        meterId,
-        createdAt: { lt: newReading.createdAt }
-      },
+    const prev = await prisma.meterReading.findFirst({
+      where: { meterId, createdAt: { lt: newReading.createdAt } },
       orderBy: { createdAt: 'desc' }
     })
+    const usage = prev ? Math.max(0, newReading.reading - prev.reading) : 0
 
-    const usage = previousReading 
-      ? Math.max(0, newReading.reading - previousReading.reading)
-      : 0
-
-    const estimatedCost = usage * 19.3
-
-    return NextResponse.json({ 
+    return NextResponse.json({
       reading: {
         ...newReading,
         usage,
-        estimatedCost: Math.round(estimatedCost)
+        estimatedCost: calculateCost(usage)
       }
     }, { status: 201 })
   } catch (error) {

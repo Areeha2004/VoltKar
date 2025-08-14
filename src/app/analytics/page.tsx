@@ -1,15 +1,19 @@
 'use client'
 import React, { useState } from 'react'
+import { useEffect } from 'react'
 import { TrendingUp, Calendar, Download, Target, Zap, DollarSign, Activity, Brain, Sparkles, ArrowUp, ArrowDown } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, Area, AreaChart } from 'recharts'
 import Navbar from '../../components/layout/Navbar'
 import Sidebar from '../../components/layout/Sidebar'
 import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
-
+import { BarChart3 } from 'lucide-react'
 const AnalyticsPage: React.FC = () => {
   const [timeframe, setTimeframe] = useState('monthly')
   const [forecastMonths, setForecastMonths] = useState(3)
+  const [analyticsData, setAnalyticsData] = useState<any>(null)
+  const [forecastData, setForecastData] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
 
   // Sample data for charts
   const usageData = [
@@ -72,6 +76,42 @@ const AnalyticsPage: React.FC = () => {
     }
   ]
 
+  // Fetch analytics and forecast data
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true)
+        
+        // Fetch analytics data
+        const analyticsResponse = await fetch('/api/analytics/usage')
+        const forecastResponse = await fetch('/api/forecast/bill')
+        
+        if (analyticsResponse.ok) {
+          const analyticsResult = await analyticsResponse.json()
+          setAnalyticsData(analyticsResult.data)
+        }
+        
+        if (forecastResponse.ok) {
+          const forecastResult = await forecastResponse.json()
+          setForecastData(forecastResult.data)
+        }
+      } catch (error) {
+        console.error('Failed to fetch analytics data:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchData()
+  }, [])
+
+  // Transform analytics data for charts
+  const chartData = analyticsData ? analyticsData.weeklyBreakdown.map((week: any) => ({
+    week: `Week ${week.week}`,
+    usage: week.usage,
+    cost: week.cost
+  })) : usageData.slice(0, 5)
+
   const getPriorityColor = (priority: string) => {
     switch (priority) {
       case 'high': return 'border-l-accent-amber bg-accent-amber/5'
@@ -79,6 +119,14 @@ const AnalyticsPage: React.FC = () => {
       case 'low': return 'border-l-primary bg-primary/5'
       default: return 'border-l-border bg-background-secondary'
     }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="text-2xl text-foreground">Loading analytics...</div>
+      </div>
+    )
   }
 
   return (
@@ -133,9 +181,9 @@ const AnalyticsPage: React.FC = () => {
               {[
                 { 
                   title: 'Current Usage', 
-                  value: '890', 
+                  value: analyticsData?.monthToDateUsage?.toString() || '0', 
                   unit: 'kWh', 
-                  change: '+15%', 
+                  change: '+12%', 
                   changeType: 'increase',
                   icon: Zap,
                   gradient: 'from-accent-blue to-accent-purple',
@@ -143,10 +191,10 @@ const AnalyticsPage: React.FC = () => {
                 },
                 { 
                   title: 'Projected Bill', 
-                  value: '17,200', 
+                  value: forecastData?.forecast?.bill?.expected?.toLocaleString() || '0', 
                   unit: 'PKR', 
-                  change: '+8%', 
-                  changeType: 'increase',
+                  change: forecastData?.comparison?.vsLastMonth ? `${forecastData.comparison.vsLastMonth > 0 ? '+' : ''}${forecastData.comparison.vsLastMonth}%` : '0%', 
+                  changeType: forecastData?.comparison?.vsLastMonth > 0 ? 'increase' : 'decrease',
                   icon: DollarSign,
                   gradient: 'from-primary to-accent-cyan',
                   description: 'Based on current usage'
@@ -155,7 +203,7 @@ const AnalyticsPage: React.FC = () => {
                   title: 'Efficiency Score', 
                   value: '82', 
                   unit: '%', 
-                  change: '+4%', 
+                  change: '+5%', 
                   changeType: 'decrease',
                   icon: Target,
                   gradient: 'from-accent-emerald to-primary',
@@ -163,7 +211,7 @@ const AnalyticsPage: React.FC = () => {
                 },
                 { 
                   title: 'Cost per kWh', 
-                  value: '19.3', 
+                  value: analyticsData?.metrics?.costPerKwh?.toString() || '0', 
                   unit: 'PKR', 
                   change: '-2%', 
                   changeType: 'decrease',
@@ -240,7 +288,7 @@ const AnalyticsPage: React.FC = () => {
                     
                     <div className="h-96">
                       <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={usageData}>
+                        <AreaChart data={chartData}>
                           <defs>
                             <linearGradient id="usageGradient" x1="0" y1="0" x2="0" y2="1">
                               <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
@@ -252,7 +300,7 @@ const AnalyticsPage: React.FC = () => {
                             </linearGradient>
                           </defs>
                           <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-                          <XAxis dataKey="month" stroke="#a1a1aa" fontSize={12} />
+                          <XAxis dataKey="week" stroke="#a1a1aa" fontSize={12} />
                           <YAxis stroke="#a1a1aa" fontSize={12} />
                           <Tooltip 
                             contentStyle={{ 
@@ -268,15 +316,6 @@ const AnalyticsPage: React.FC = () => {
                             stroke="#10b981"
                             strokeWidth={3}
                             fill="url(#usageGradient)"
-                            dot={{ fill: '#10b981', strokeWidth: 2, r: 6 }}
-                          />
-                          <Area
-                            type="monotone"
-                            dataKey="forecast"
-                            stroke="#3b82f6"
-                            strokeWidth={2}
-                            strokeDasharray="8 4"
-                            fill="url(#forecastGradient)"
                             dot={{ fill: '#3b82f6', strokeWidth: 2, r: 5 }}
                           />
                         </AreaChart>
@@ -285,12 +324,12 @@ const AnalyticsPage: React.FC = () => {
 
                     <div className="grid grid-cols-3 gap-4 pt-4 border-t border-border/50">
                       <div className="text-center">
-                        <p className="text-2xl font-bold text-primary">+15%</p>
-                        <p className="text-sm text-foreground-secondary">Monthly Growth</p>
+                        <p className="text-2xl font-bold text-primary">{analyticsData?.daysElapsed || 0}</p>
+                        <p className="text-sm text-foreground-secondary">Days Elapsed</p>
                       </div>
                       <div className="text-center">
-                        <p className="text-2xl font-bold text-accent-blue">920</p>
-                        <p className="text-sm text-foreground-secondary">Predicted Next Month</p>
+                        <p className="text-2xl font-bold text-accent-blue">{forecastData?.forecast?.usage?.expected || 0}</p>
+                        <p className="text-sm text-foreground-secondary">Projected Usage</p>
                       </div>
                       <div className="text-center">
                         <p className="text-2xl font-bold text-accent-amber">94%</p>
@@ -300,6 +339,34 @@ const AnalyticsPage: React.FC = () => {
                   </div>
                 </Card>
               </div>
+
+              {/* Real Analytics Data */}
+              {analyticsData && (
+                <Card className="card-premium">
+                  <div className="space-y-6">
+                    <div className="flex items-center space-x-3">
+                      <div className="bg-gradient-to-r from-accent-blue to-accent-purple p-2 rounded-xl">
+                        <BarChart3 className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <h2 className="text-xl font-semibold text-foreground font-sora">Live Analytics</h2>
+                        <p className="text-foreground-secondary text-sm">Real data from your readings</p>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="p-4 rounded-xl bg-background-card/30">
+                        <p className="text-sm text-foreground-secondary">Active Weeks</p>
+                        <p className="text-2xl font-bold text-foreground">{analyticsData.metrics?.activeWeeks || 0}</p>
+                      </div>
+                      <div className="p-4 rounded-xl bg-background-card/30">
+                        <p className="text-sm text-foreground-secondary">Total Readings</p>
+                        <p className="text-2xl font-bold text-foreground">{analyticsData.metrics?.totalReadings || 0}</p>
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              )}
 
               {/* AI Insights */}
               <Card className="card-premium">

@@ -1,10 +1,7 @@
-// app/api/readings/latest/route.ts
-
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '../../auth/[...nextauth]/route'
 import prisma from '@/lib/prisma'
-import { calculateElectricityBill } from '@/lib/slabCalculations'
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,58 +10,33 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    // Get all user's meters
     const meters = await prisma.meter.findMany({
       where: { userId: session.user.id },
     })
 
+    // Get latest reading for each meter
     const latestReadings = await Promise.all(
       meters.map(async (meter) => {
         const latest = await prisma.meterReading.findFirst({
           where: { meterId: meter.id },
-          orderBy: { createdAt: 'desc' },
+          orderBy: { date: 'desc' },
           include: { meter: true },
         })
 
-        if (!latest) {
-          return {
-            meterId: meter.id,
-            meterName: meter.label,
-            reading: null,
-            date: null,
-            usage: 0,
-            estimatedCost: 0,
-          }
-        }
-
-        const prev = await prisma.meterReading.findFirst({
-          where: { meterId: meter.id, createdAt: { lt: latest.createdAt } },
-          orderBy: { createdAt: 'desc' },
-        })
-
-        const baseValue = prev?.reading ?? meter.lastReading ?? 0
-        const usage = Math.max(0, latest.reading - baseValue)
-
-        let estimatedCost = latest.estimatedCost
-        let costBreakdown = null
-
-        // recalc if missing or out-of-sync
-        if ((!estimatedCost || usage !== latest.usage) && usage > 0) {
-          costBreakdown = calculateElectricityBill(usage)
-          estimatedCost = Math.round(costBreakdown.totalCost)
-
-          // persist fix
-          await prisma.meterReading.update({
-            where: { id: latest.id },
-            data: { usage, estimatedCost },
-          })
-        }
-
         return {
-          ...latest,
-          usage,
-          estimatedCost,
-          slabWarning: costBreakdown?.slabWarning || false,
-          costBreakdown,
+          meterId: meter.id,
+          meterName: meter.label,
+          meterType: meter.type,
+          reading: latest?.reading || null,
+          date: latest?.date || null,
+          week: latest?.week || null,
+          month: latest?.month || null,
+          year: latest?.year || null,
+          usage: latest?.usage || 0,
+          estimatedCost: latest?.estimatedCost || 0,
+          isOfficialEndOfMonth: latest?.isOfficialEndOfMonth || false,
+          lastReadingId: latest?.id || null
         }
       })
     )

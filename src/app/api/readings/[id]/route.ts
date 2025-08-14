@@ -1,10 +1,8 @@
-// app/api/readings/[id]/route.ts
-
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '../../auth/[...nextauth]/route'
 import prisma from '@/lib/prisma'
-import { calculateElectricityBill } from '@/lib/slabCalculations'
+import { tariffEngine, calculateUsage } from '@/lib/tariffEngine'
 
 export async function PUT(
   request: NextRequest,
@@ -16,10 +14,10 @@ export async function PUT(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { reading, month, year, notes } = await request.json()
+    const { reading, week, month, year, isOfficialEndOfMonth, notes } = await request.json()
     const readingId = params.id
 
-    // verify and load existing reading
+    // Verify and load existing reading
     const existing = await prisma.meterReading.findFirst({
       where: { id: readingId, userId: session.user.id },
       include: { meter: true },
@@ -28,62 +26,77 @@ export async function PUT(
       return NextResponse.json({ error: 'Reading not found' }, { status: 404 })
     }
 
-    // 1) update the raw fields
-    const updatedRaw = await prisma.meterReading.update({
+    // Update the reading
+    const updatedReading = await prisma.meterReading.update({
       where: { id: readingId },
       data: {
-        reading: parseFloat(reading),
-        month,
-        year,
-        notes: notes?.trim() || null,
+        reading: reading !== undefined ? parseFloat(reading) : existing.reading,
+        week: week !== undefined ? week : existing.week,
+        month: month !== undefined ? month : existing.month,
+        year: year !== undefined ? year : existing.year,
+        isOfficialEndOfMonth: isOfficialEndOfMonth !== undefined ? isOfficialEndOfMonth : existing.isOfficialEndOfMonth,
+        notes: notes !== undefined ? (notes?.trim() || null) : existing.notes,
       },
       include: { meter: true },
     })
 
-    // 2) find previous reading (by createdAt)
-    const prev = await prisma.meterReading.findFirst({
+    // Recalculate usage and cost for this reading
+    const previousReading = await prisma.meterReading.findFirst({
       where: {
-        meterId: updatedRaw.meterId,
-        createdAt: { lt: updatedRaw.createdAt },
+        meterId: updatedReading.meterId,
+      
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { date: 'desc' },
     })
 
-    // fallback to meter.lastReading if no prev
-    const baseValue = prev?.reading ?? updatedRaw.meter.lastReading ?? 0
-    const usage = Math.max(0, updatedRaw.reading - baseValue)
+    const baseValue = previousReading?.reading ?? 0
+    const usage = calculateUsage(updatedReading.reading, baseValue)
 
     let estimatedCost = 0
-    let costBreakdown = null
     if (usage > 0) {
-      costBreakdown = calculateElectricityBill(usage)
-      estimatedCost = Math.round(costBreakdown.totalCost)
+      const costBreakdown = tariffEngine(usage)
+      estimatedCost = costBreakdown.totalCost
     }
 
-    // 3) persist usage & cost
-    const final = await prisma.meterReading.update({
+    // Update usage and cost
+    const finalReading = await prisma.meterReading.update({
       where: { id: readingId },
       data: { usage, estimatedCost },
       include: { meter: true },
     })
 
-    // 4) if this is now the latest reading, bump meter.lastReading
-    if (final.reading >= updatedRaw.meter.lastReading) {
-      await prisma.meter.update({
-        where: { id: final.meterId },
-        data: { lastReading: final.reading },
+    // Recalculate usage for all subsequent readings of the same meter
+    const subsequentReadings = await prisma.meterReading.findMany({
+      where: {
+        meterId: updatedReading.meterId,
+        date: { gt: updatedReading.date },
+      },
+      orderBy: { date: 'asc' },
+    })
+
+    // Update each subsequent reading
+    for (let i = 0; i < subsequentReadings.length; i++) {
+      const currentReading = subsequentReadings[i]
+      const prevReading = i === 0 ? updatedReading : subsequentReadings[i - 1]
+      
+      const newUsage = calculateUsage(currentReading.reading, prevReading.reading)
+      let newCost = 0
+      
+      if (newUsage > 0) {
+        const costBreakdown = tariffEngine(newUsage)
+        newCost = costBreakdown.totalCost
+      }
+
+      await prisma.meterReading.update({
+        where: { id: currentReading.id },
+        data: { 
+          usage: newUsage, 
+          estimatedCost: newCost 
+        },
       })
     }
 
-    return NextResponse.json({
-      reading: {
-        ...final,
-        usage,
-        estimatedCost,
-        slabWarning: costBreakdown?.slabWarning || false,
-        costBreakdown,
-      },
-    })
+    return NextResponse.json({ reading: finalReading })
   } catch (error) {
     console.error('Error updating reading:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
@@ -99,6 +112,7 @@ export async function DELETE(
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+
     const readingId = params.id
 
     const existing = await prisma.meterReading.findFirst({
@@ -108,17 +122,72 @@ export async function DELETE(
       return NextResponse.json({ error: 'Reading not found' }, { status: 404 })
     }
 
+    // Find the next reading for recalculation
+    const nextReading = await prisma.meterReading.findFirst({
+      where: {
+        meterId: existing.meterId,
+        date: { gt: existing.date },
+      },
+      orderBy: { date: 'asc' },
+    })
+
+    // Delete the reading
     await prisma.meterReading.delete({ where: { id: readingId } })
 
-    // optional: recalc meter.lastReading to latest remaining reading
-    const latest = await prisma.meterReading.findFirst({
-      where: { meterId: existing.meterId },
-      orderBy: { createdAt: 'desc' },
-    })
-    await prisma.meter.update({
-      where: { id: existing.meterId },
-      data: { lastReading: latest?.reading ?? 0 },
-    })
+    // Recalculate usage for the next reading if it exists
+    if (nextReading) {
+      const newPreviousReading = await prisma.meterReading.findFirst({
+        where: {
+          meterId: existing.meterId,
+          date: { lt: nextReading.date },
+        },
+        orderBy: { date: 'desc' },
+      })
+
+      const baseValue = newPreviousReading?.reading ?? 0
+      const newUsage = calculateUsage(nextReading.reading, baseValue)
+      
+      let newCost = 0
+      if (newUsage > 0) {
+        const costBreakdown = tariffEngine(newUsage)
+        newCost = costBreakdown.totalCost
+      }
+
+      await prisma.meterReading.update({
+        where: { id: nextReading.id },
+        data: { 
+          usage: newUsage, 
+          estimatedCost: newCost 
+        },
+      })
+
+      // Recalculate all subsequent readings
+      const subsequentReadings = await prisma.meterReading.findMany({
+        where: {
+          meterId: existing.meterId,
+          date: { gt: nextReading.date },
+        },
+        orderBy: { date: 'asc' },
+      })
+
+      let prevReading = nextReading
+      for (const reading of subsequentReadings) {
+        const usage = calculateUsage(reading.reading, prevReading.reading)
+        let cost = 0
+        
+        if (usage > 0) {
+          const costBreakdown = tariffEngine(usage)
+          cost = costBreakdown.totalCost
+        }
+
+        await prisma.meterReading.update({
+          where: { id: reading.id },
+          data: { usage, estimatedCost: cost },
+        })
+
+        prevReading = reading
+      }
+    }
 
     return NextResponse.json({ message: 'Reading deleted successfully' })
   } catch (error) {

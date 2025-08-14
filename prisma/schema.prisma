@@ -47,15 +47,16 @@ model MeterReading {
   meterId   String
   userId    String
   reading   Float       // The actual meter reading value
-  week      Int         // 1–5 for weekly readings
+  week      Int         @default(1) // 1–5 for weekly readings
   month     Int
   year      Int
   date      DateTime    @default(now())
   createdAt DateTime    @default(now())
   
+  isOfficialEndOfMonth Boolean @default(false) // True for official end-of-month readings
   lastReading   Decimal?  // Value from previous week/month
   usage         Float?    // kWh consumed since last reading
-  estimatedCost Float?    // Cached for speed
+  estimatedCost Float?    // Cached cost calculation
   notes         String?
 
   meter Meter @relation(fields: [meterId], references: [id], onDelete: Cascade)
@@ -73,7 +74,7 @@ model Tariff {
   fuelAdj      Float
   fixedCharges Float
   taxPercent   Float
-  tvFee        Float?   // New field for TV fee
+  tvFee        Float    @default(35)   // TV fee
   updatedAt    DateTime @updatedAt
 }
 

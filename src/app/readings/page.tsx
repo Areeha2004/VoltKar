@@ -2,17 +2,13 @@
 import React, { useState, useEffect } from 'react'
 import { useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
-import { Calendar, Home, Save, History, Plus, Zap, TrendingUp, Clock, CheckCircle, AlertCircle, Camera, Upload, RefreshCw } from 'lucide-react'
+import { Calendar, Home, Save, History, Plus, Zap, TrendingUp, Clock, CheckCircle, AlertCircle, Camera, Upload, RefreshCw, Hash } from 'lucide-react'
 import Navbar from '../../components/layout/Navbar'
 import Sidebar from '../../components/layout/Sidebar'
 import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
 import Input from '../../components/ui/Input'
-import SlabProgressIndicator from '../../components/readings/SlabProgressIndicator'
-import CostBreakdownCard from '../../components/readings/CostBreakdownCard'
-import ReadingTypeSelector from '../../components/readings/ReadingTypeSelector'
-import SlabWarningAlert from '../../components/ui/SlabWarningAlert'
-import { calculateUsage, projectMonthlyCost, calculateElectricityBill } from '../../lib/slabCalculations'
+import { tariffEngine, calculateUsage, getSlabWarningMessage } from '../../lib/tariffEngine'
 
 const ReadingEntryPage: React.FC = () => {
   const { data: session } = useSession()
@@ -20,8 +16,9 @@ const ReadingEntryPage: React.FC = () => {
   
   // Form state
   const [selectedMeter, setSelectedMeter] = useState('main-house')
-  const [readingType, setReadingType] = useState<'mandatory' | 'mini'>('mini')
+  const [week, setWeek] = useState(Math.ceil(new Date().getDate() / 7))
   const [reading, setReading] = useState('')
+  const [isOfficialEndOfMonth, setIsOfficialEndOfMonth] = useState(false)
   const [date, setDate] = useState(new Date().toISOString().split('T')[0])
   const [notes, setNotes] = useState('')
   const [photoMode, setPhotoMode] = useState(false)
@@ -103,6 +100,7 @@ const ReadingEntryPage: React.FC = () => {
     const readingDate = new Date(date)
     const month = readingDate.getMonth() + 1
     const year = readingDate.getFullYear()
+    const calculatedWeek = week || Math.ceil(readingDate.getDate() / 7)
 
     const response = await fetch('/api/readings', {
       method: 'POST',
@@ -110,9 +108,12 @@ const ReadingEntryPage: React.FC = () => {
       body: JSON.stringify({
         meterId: selectedMeter,
         reading: parseFloat(reading),
+        week: calculatedWeek,
         month,
         year,
+        isOfficialEndOfMonth,
         notes: notes.trim() || undefined,
+        date: readingDate.toISOString(),
       }),
     })
 
@@ -132,7 +133,9 @@ const ReadingEntryPage: React.FC = () => {
 
     setReading('')
     setNotes('')
+    setIsOfficialEndOfMonth(false)
     setDate(new Date().toISOString().split('T')[0])
+    setWeek(Math.ceil(new Date().getDate() / 7))
 
     // Show success message
     const successMsg = `Reading submitted successfully! Usage: ${data.reading.usage || 0} kWh, Cost: Rs ${(data.reading.estimatedCost || 0).toLocaleString()}`;
@@ -148,8 +151,8 @@ const ReadingEntryPage: React.FC = () => {
   const selectedMeterData = meters.find(m => m.id === selectedMeter)
   
   // Calculate usage and cost for preview
-  const calculatedUsage = selectedMeterData && reading ? calculateUsage(parseInt(reading), selectedMeterData.lastReading || 0) : 0;
-  const calculatedCost = calculatedUsage > 0 ? calculateElectricityBill(calculatedUsage) : null;
+  const calculatedUsage = selectedMeterData && reading ? calculateUsage(parseFloat(reading), selectedMeterData.lastReading || 0) : 0;
+  const calculatedCost = calculatedUsage > 0 ? tariffEngine(calculatedUsage) : null;
   
   // Calculate projected monthly usage for warnings
   const currentDate = new Date()
@@ -314,12 +317,6 @@ const ReadingEntryPage: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Reading Type Selection */}
-                    <ReadingTypeSelector
-                      selectedType={readingType}
-                      onTypeChange={setReadingType}
-                    />
-
                     {/* Meter Selection */}
                     <div className="space-y-4">
                       <label className="text-lg font-semibold text-foreground">Select Meter</label>
@@ -379,7 +376,7 @@ const ReadingEntryPage: React.FC = () => {
                       )}
                     </div>
 
-                    <div className="grid md:grid-cols-2 gap-6">
+                    <div className="grid md:grid-cols-3 gap-6">
                       {/* Date Selection */}
                       <div className="relative">
                         <Input
@@ -390,6 +387,20 @@ const ReadingEntryPage: React.FC = () => {
                           required
                         />
                         
+                      </div>
+
+                      {/* Week Selection */}
+                      <div className="space-y-2">
+                        <label className="text-sm font-medium text-foreground-secondary">Week of Month</label>
+                        <select
+                          value={week}
+                          onChange={(e) => setWeek(parseInt(e.target.value))}
+                          className="input-field w-full"
+                        >
+                          {[1, 2, 3, 4, 5].map(w => (
+                            <option key={w} value={w}>Week {w}</option>
+                          ))}
+                        </select>
                       </div>
 
                       {/* Reading Input */}
@@ -413,38 +424,65 @@ const ReadingEntryPage: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Usage Calculation */}
-                    {reading && selectedMeterData && calculatedUsage > 0 && calculatedCost && (
-                      <div className="space-y-6">
-                        {/* Slab Warning Alert */}
-                        <SlabWarningAlert units={calculatedUsage} />
-                        
-                        {/* Cost Breakdown */}
-                        <CostBreakdownCard
-                          units={calculatedUsage}
-                          title={`Estimated Cost Breakdown (${calculatedUsage} kWh)`}
-                          showProjection={readingType === 'mini'}
-                          projectedUnits={readingType === 'mini' ? projectedMonthlyUsage : undefined}
-                        />
-                        
-                        {/* Slab Progress Indicator */}
-                        <SlabProgressIndicator
-                          currentUnits={calculatedUsage}
-                          projectedUnits={readingType === 'mini' ? projectedMonthlyUsage : undefined}
-                        />
+                    {/* Official End of Month Checkbox */}
+                    <div className="flex items-center space-x-3 p-4 rounded-2xl bg-background-card/30 border border-border/30">
+                      <input
+                        type="checkbox"
+                        id="isOfficialEndOfMonth"
+                        checked={isOfficialEndOfMonth}
+                        onChange={(e) => setIsOfficialEndOfMonth(e.target.checked)}
+                        className="w-5 h-5 rounded border-border bg-background-card text-primary focus:ring-primary/20"
+                      />
+                      <div>
+                        <label htmlFor="isOfficialEndOfMonth" className="font-medium text-foreground cursor-pointer">
+                          Official End-of-Month Reading
+                        </label>
+                        <p className="text-sm text-foreground-secondary">
+                          Check this if this is your official monthly reading for bill calculation
+                        </p>
                       </div>
+                    </div>
+
+                    {/* Cost Preview */}
+                    {reading && selectedMeterData && calculatedUsage > 0 && calculatedCost && (
+                      <Card className="bg-gradient-to-r from-primary/10 to-accent-cyan/10 border border-primary/20">
+                        <div className="space-y-4">
+                          <h3 className="font-semibold text-foreground flex items-center space-x-2">
+                            <Zap className="h-5 w-5 text-primary" />
+                            <span>Cost Preview</span>
+                          </h3>
+                          
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="text-center p-3 rounded-xl bg-background-card/50">
+                              <p className="text-sm text-foreground-secondary">Usage</p>
+                              <p className="text-2xl font-bold text-foreground">{calculatedUsage} kWh</p>
+                            </div>
+                            <div className="text-center p-3 rounded-xl bg-background-card/50">
+                              <p className="text-sm text-foreground-secondary">Estimated Cost</p>
+                              <p className="text-2xl font-bold text-primary">Rs {Math.round(calculatedCost.totalCost).toLocaleString()}</p>
+                            </div>
+                          </div>
+
+                          {/* Slab Warning */}
+                          {(() => {
+                            const warningMessage = getSlabWarningMessage(calculatedUsage)
+                            if (warningMessage) {
+                              return (
+                                <div className="p-3 rounded-xl bg-accent-amber/10 border border-accent-amber/20">
+                                  <div className="flex items-center space-x-2">
+                                    <AlertCircle className="h-4 w-4 text-accent-amber" />
+                                    <p className="text-sm text-accent-amber font-medium">Slab Warning</p>
+                                  </div>
+                                  <p className="text-sm text-foreground-secondary mt-1">{warningMessage}</p>
+                                </div>
+                              )
+                            }
+                            return null
+                          })()}
+                        </div>
+                      </Card>
                     )}
                     
-                    {/* Usage Preview */}
-                    {reading && selectedMeterData && calculatedUsage > 0 && (
-                      <div className="p-4 rounded-2xl bg-primary/10 border border-primary/20">
-                        <div className="flex justify-between items-center">
-                          <span className="text-foreground-secondary">Calculated Usage:</span>
-                          <span className="font-bold text-primary">{calculatedUsage} kWh</span>
-                        </div>
-                      </div>
-                    )}
-
                     {/* Notes */}
                     <div className="space-y-3">
                       <label className="text-lg font-semibold text-foreground">Notes (Optional)</label>
@@ -474,7 +512,7 @@ const ReadingEntryPage: React.FC = () => {
                       disabled={submitting || !selectedMeter || !reading || meters.length === 0}
                     >
                       <Save className="h-6 w-6 mr-3" />
-                      {submitting ? 'Saving...' : `Save ${readingType === 'mandatory' ? 'End-of-Month' : 'Mini'} Reading`}
+                      {submitting ? 'Saving...' : `Save ${isOfficialEndOfMonth ? 'Official' : 'Weekly'} Reading`}
                     </Button>
                   </form>
                 </Card>
@@ -506,6 +544,11 @@ const ReadingEntryPage: React.FC = () => {
                         <div className="flex items-center justify-between">
                           <div className="flex items-center space-x-2">
                             <span className="font-semibold text-foreground">{entry.meter.label}</span>
+                            {entry.isOfficialEndOfMonth && (
+                              <span className="px-2 py-1 rounded-full text-xs font-medium bg-primary/10 text-primary">
+                                Official
+                              </span>
+                            )}
                             {getStatusIcon('verified')}
                           </div>
                           <span className="text-sm text-foreground-tertiary">
@@ -515,6 +558,10 @@ const ReadingEntryPage: React.FC = () => {
                         
                         <div className="grid grid-cols-3 gap-3 text-sm">
                           <div>
+                            <p className="text-foreground-tertiary">Week</p>
+                            <p className="font-semibold text-foreground">Week {entry.week || 1}</p>
+                          </div>
+                          <div>
                             <p className="text-foreground-tertiary">Reading</p>
                             <p className="font-semibold text-foreground font-mono">{entry.reading?.toLocaleString() || 'N/A'}</p>
                           </div>
@@ -522,9 +569,12 @@ const ReadingEntryPage: React.FC = () => {
                             <p className="text-foreground-tertiary">Usage</p>
                             <p className="font-semibold text-foreground">{entry.usage?.toFixed(1) || '0'} kWh</p>
                           </div>
-                          <div>
-                            <p className="text-foreground-tertiary">Cost</p>
-                            <p className="font-semibold text-primary">Rs {Math.round(entry.estimatedCost || 0).toLocaleString()}</p>
+                        </div>
+
+                        <div className="pt-2 border-t border-border/30">
+                          <div className="flex justify-between items-center">
+                            <span className="text-sm text-foreground-secondary">Estimated Cost:</span>
+                            <span className="font-bold text-primary">Rs {Math.round(entry.estimatedCost || 0).toLocaleString()}</span>
                           </div>
                         </div>
 
@@ -573,7 +623,7 @@ const ReadingEntryPage: React.FC = () => {
                   {[
                     {
                       title: 'Consistent Timing',
-                      description: 'Take readings at the same time each month for accurate usage tracking',
+                      description: 'Take readings at consistent intervals (weekly) for accurate usage tracking',
                       icon: Clock
                     },
                     {
@@ -583,7 +633,7 @@ const ReadingEntryPage: React.FC = () => {
                     },
                     {
                       title: 'Note Anomalies',
-                      description: 'Record any unusual readings or meter conditions in the notes section',
+                      description: 'Record any unusual readings, meter conditions, or special circumstances',
                       icon: AlertCircle
                     }
                   ].map((tip, index) => (

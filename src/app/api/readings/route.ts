@@ -1,10 +1,9 @@
-// app/api/readings/route.ts
-
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '../auth/[...nextauth]/route'
 import prisma from '@/lib/prisma'
-import { calculateElectricityBill } from '@/lib/slabCalculations'
+import { recomputeAnalytics } from '@/lib/analytics'
+import { tariffEngine, calculateUsage } from '@/lib/tariffEngine'
 
 export async function GET(request: NextRequest) {
   try {
@@ -15,59 +14,66 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url)
     const meterId = searchParams.get('meterId')
+    const from = searchParams.get('from')
+    const to = searchParams.get('to')
     const limit = parseInt(searchParams.get('limit') || '10')
     const offset = parseInt(searchParams.get('offset') || '0')
 
     const where: any = { userId: session.user.id }
     if (meterId) where.meterId = meterId
+    if (from || to) {
+      where.date = {}
+      if (from) where.date.gte = new Date(from)
+      if (to) where.date.lte = new Date(to)
+    }
 
     const readings = await prisma.meterReading.findMany({
       where,
       include: { meter: true },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { date: 'desc' },
       take: limit,
       skip: offset,
     })
 
-    const readingsWithUsage = await Promise.all(
-      readings.map(async (reading) => {
-        // find previous DB reading
-        const prev = await prisma.meterReading.findFirst({
-          where: { meterId: reading.meterId, createdAt: { lt: reading.createdAt } },
-          orderBy: { createdAt: 'desc' },
-        })
+    // Calculate aggregates if requested
+    const includeAggregates = searchParams.get('aggregates') === 'true'
+    let aggregates = null
 
-        // fallback to meter.lastReading when no prev
-        const baseValue = prev?.reading ?? reading.meter.lastReading ?? 0
-        const usage = Math.max(0, reading.reading - baseValue)
+    if (includeAggregates && meterId) {
+      const currentDate = new Date()
+      const currentMonth = currentDate.getMonth() + 1
+      const currentYear = currentDate.getFullYear()
 
-        let estimatedCost = 0
-        let costBreakdown = null
-
-        if (usage > 0) {
-          costBreakdown = calculateElectricityBill(usage)
-          estimatedCost = Math.round(costBreakdown.totalCost)
-
-          // persist if changed
-          if (reading.usage !== usage || reading.estimatedCost !== estimatedCost) {
-            await prisma.meterReading.update({
-              where: { id: reading.id },
-              data: { usage, estimatedCost },
-            })
-          }
-        }
-
-        return {
-          ...reading,
-          usage,
-          estimatedCost,
-          slabWarning: costBreakdown?.slabWarning || false,
-          costBreakdown,
-        }
+      // Weekly aggregates for current month
+      const weeklyReadings = await prisma.meterReading.findMany({
+        where: {
+          meterId,
+          month: currentMonth,
+          year: currentYear
+        },
+        orderBy: { week: 'asc' }
       })
-    )
 
-    return NextResponse.json({ readings: readingsWithUsage })
+      const weeklySum = weeklyReadings.reduce((acc, reading) => {
+        acc[reading.week] = (acc[reading.week] || 0) + (reading.usage || 0)
+        return acc
+      }, {} as Record<number, number>)
+
+      // Monthly sum
+      const monthSum = weeklyReadings.reduce((sum, reading) => sum + (reading.usage || 0), 0)
+
+      aggregates = {
+        weeklySum,
+        monthSum,
+        readingsCount: weeklyReadings.length
+      }
+    }
+
+    return NextResponse.json({ 
+      readings,
+      aggregates,
+      total: readings.length 
+    })
   } catch (error) {
     console.error('Error fetching readings:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
@@ -81,15 +87,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { meterId, reading, month, year, notes } = await request.json()
-    if (!meterId || reading === undefined || !month || !year) {
+    const { meterId, reading, date, week, month, year, isOfficialEndOfMonth, notes } = await request.json()
+
+    // Validate required fields
+    if (!meterId || reading === undefined || !week || !month || !year) {
       return NextResponse.json(
-        { error: 'MeterId, reading, month, and year are required' },
+        { error: 'MeterId, reading, week, month, and year are required' },
         { status: 400 }
       )
     }
 
-    // load meter (for lastReading baseline)
+    // Validate week range
+    if (week < 1 || week > 5) {
+      return NextResponse.json(
+        { error: 'Week must be between 1 and 5' },
+        { status: 400 }
+      )
+    }
+
+    // Load meter to verify ownership
     const meter = await prisma.meter.findFirst({
       where: { id: meterId, userId: session.user.id },
     })
@@ -97,49 +113,49 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Meter not found' }, { status: 404 })
     }
 
-    // prevent duplicate month
+    // Check for duplicate reading (same meter, week, month, year)
     const existing = await prisma.meterReading.findFirst({
-      where: { meterId, month, year },
+      where: { meterId, week, month, year },
     })
     if (existing) {
       return NextResponse.json(
-        { error: 'Reading for this month already exists' },
+        { error: 'Reading for this week already exists' },
         { status: 409 }
       )
     }
 
-    // 1) create placeholder
-    const created = await prisma.meterReading.create({
+    // Find previous reading for usage calculation
+    const readingDate = date ? new Date(date) : new Date()
+    const previousReading = await prisma.meterReading.findFirst({
+      where: { 
+        meterId, 
+        date: { lt: readingDate }
+      },
+      orderBy: { date: 'desc' },
+    })
+
+    // Calculate usage
+    const baseValue = previousReading?.reading ?? 0
+    const usage = calculateUsage(parseFloat(reading), baseValue)
+
+    // Calculate cost using tariff engine
+    let estimatedCost = 0
+    if (usage > 0) {
+      const costBreakdown = tariffEngine(usage)
+      estimatedCost = costBreakdown.totalCost
+    }
+
+    // Create the reading
+    const newReading = await prisma.meterReading.create({
       data: {
         meterId,
         userId: session.user.id,
         reading: parseFloat(reading),
+        week,
         month,
         year,
-      },
-      include: { meter: true },
-    })
-
-    // 2) find previous reading
-    const prev = await prisma.meterReading.findFirst({
-      where: { meterId, createdAt: { lt: created.createdAt } },
-      orderBy: { createdAt: 'desc' },
-    })
-
-    const baseValue = prev?.reading ?? meter.lastReading ?? 0
-    const usage = Math.max(0, created.reading - baseValue)
-
-    let estimatedCost = 0
-    let costBreakdown = null
-    if (usage > 0) {
-      costBreakdown = calculateElectricityBill(usage)
-      estimatedCost = Math.round(costBreakdown.totalCost)
-    }
-
-    // 3) persist usage, cost, notes
-    const updated = await prisma.meterReading.update({
-      where: { id: created.id },
-      data: {
+        date: readingDate,
+        isOfficialEndOfMonth: isOfficialEndOfMonth || false,
         usage,
         estimatedCost,
         notes: notes?.trim() || null,
@@ -147,22 +163,15 @@ export async function POST(request: NextRequest) {
       include: { meter: true },
     })
 
-    // 4) update meter.lastReading
-    await prisma.meter.update({
-      where: { id: meterId },
-      data: { lastReading: created.reading },
-    })
+    // Recompute analytics after creating new reading
+    try {
+      await recomputeAnalytics(session.user.id, meterId)
+    } catch (analyticsError) {
+      console.warn('Analytics recomputation failed:', analyticsError)
+    }
 
     return NextResponse.json(
-      {
-        reading: {
-          ...updated,
-          usage,
-          estimatedCost,
-          slabWarning: costBreakdown?.slabWarning || false,
-          costBreakdown,
-        },
-      },
+      { reading: newReading },
       { status: 201 }
     )
   } catch (error) {

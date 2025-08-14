@@ -30,6 +30,7 @@ import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
 import SlabProgressIndicator from '../../components/readings/SlabProgressIndicator'
 import SlabWarningAlert from '../../components/ui/SlabWarningAlert'
+import { tariffEngine } from '../../lib/tariffEngine'
 
 const Dashboard: React.FC = () => {
   const { data: session, status } = useSession();
@@ -48,6 +49,7 @@ const Dashboard: React.FC = () => {
   const [dashboardStats, setDashboardStats] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 const [alerts, setAlerts] = useState<any[]>([]);
+  const [analyticsData, setAnalyticsData] = useState<any>(null)
   // Fetch dashboard stats
   useEffect(() => {
     const fetchDashboardStats = async () => {
@@ -70,6 +72,25 @@ const [alerts, setAlerts] = useState<any[]>([]);
     }
   }, [session?.user?.id])
    
+  // Fetch analytics data
+  useEffect(() => {
+    const fetchAnalytics = async () => {
+      try {
+        const response = await fetch('/api/analytics/usage')
+        if (response.ok) {
+          const data = await response.json()
+          setAnalyticsData(data.data)
+        }
+      } catch (error) {
+        console.error('Failed to fetch analytics:', error)
+      }
+    }
+
+    if (session?.user?.id) {
+      fetchAnalytics()
+    }
+  }, [session?.user?.id])
+
   const getMetrics = () => {
     if (!dashboardStats) {
       return [
@@ -94,7 +115,7 @@ const [alerts, setAlerts] = useState<any[]>([]);
       title: 'Forecast Bill',
       value: dashboardStats.stats.forecastBill.toLocaleString(),
       unit: 'PKR',
-      change: dashboardStats.stats.usageChange, // Using same change as usage for now
+      change: dashboardStats.stats.costChange,
       changeType: dashboardStats.stats.usageChange.startsWith('+') ? 'increase' : 'decrease',
       icon: DollarSign,
       gradient: 'from-primary to-accent-cyan'
@@ -103,7 +124,7 @@ const [alerts, setAlerts] = useState<any[]>([]);
       title: 'Cost to Date',
       value: dashboardStats.stats.costToDate.toLocaleString(),
       unit: 'PKR',
-      change: dashboardStats.stats.usageChange,
+      change: dashboardStats.stats.costChange,
       changeType: dashboardStats.stats.usageChange.startsWith('+') ? 'increase' : 'decrease',
       icon: TrendingUp,
       gradient: 'from-accent-amber to-accent-pink'
@@ -112,7 +133,7 @@ const [alerts, setAlerts] = useState<any[]>([]);
       title: 'Efficiency Score',
       value: dashboardStats.stats.efficiencyScore.toString(),
       unit: '%',
-      change: '+15%', // Static for now
+      change: '+12%',
       changeType: 'decrease',
       icon: Target,
       gradient: 'from-accent-emerald to-primary'
@@ -260,16 +281,68 @@ const [alerts, setAlerts] = useState<any[]>([]);
               )}
 
               {/* Slab Progress Indicator */}
+              {analyticsData && (
+                <div className="lg:col-span-2">
+                  <Card className="card-premium">
+                    <div className="space-y-6">
+                      <div className="flex items-center space-x-3">
+                        <div className="bg-gradient-to-r from-accent-blue to-accent-purple p-2 rounded-xl">
+                          <TrendingUp className="h-6 w-6 text-white" />
+                        </div>
+                        <div>
+                          <h2 className="text-xl font-semibold text-foreground font-sora">Weekly Usage Breakdown</h2>
+                          <p className="text-foreground-secondary text-sm">Current month progress</p>
+                        </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-5 gap-4">
+                        {analyticsData.weeklyBreakdown.map((week: any, index: number) => (
+                          <div key={week.week} className="text-center p-4 rounded-2xl bg-background-card/30 border border-border/30">
+                            <div className="space-y-2">
+                              <p className="text-sm text-foreground-secondary">Week {week.week}</p>
+                              <p className="text-2xl font-bold text-foreground font-mono">{week.usage}</p>
+                              <p className="text-xs text-foreground-tertiary">kWh</p>
+                              <div className="pt-2 border-t border-border/30">
+                                <p className="text-sm font-semibold text-primary">Rs {Math.round(week.cost).toLocaleString()}</p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-4 pt-4 border-t border-border/30">
+                        <div className="text-center p-3 rounded-xl bg-background-card/50">
+                          <p className="text-sm text-foreground-secondary">MTD Usage</p>
+                          <p className="text-xl font-bold text-foreground">{analyticsData.monthToDateUsage} kWh</p>
+                        </div>
+                        <div className="text-center p-3 rounded-xl bg-background-card/50">
+                          <p className="text-sm text-foreground-secondary">MTD Cost</p>
+                          <p className="text-xl font-bold text-primary">Rs {Math.round(analyticsData.monthToDateCost).toLocaleString()}</p>
+                        </div>
+                        <div className="text-center p-3 rounded-xl bg-background-card/50">
+                          <p className="text-sm text-foreground-secondary">Daily Avg</p>
+                          <p className="text-xl font-bold text-foreground">{analyticsData.averageDailyUsage} kWh</p>
+                        </div>
+                      </div>
+                    </div>
+                  </Card>
+                </div>
+              )}
+
+              {/* Forecast Card */}
+              <ForecastCard />
+
+              {/* Original Slab Progress Indicator */}
               {dashboardStats?.stats.currentUsage > 0 && (
                 <div className="lg:col-span-2">
                   <SlabProgressIndicator 
                     currentUnits={dashboardStats.stats.currentUsage}
-                    projectedUnits={dashboardStats.stats.forecastBill / (dashboardStats.stats.avgCostPerKwh || 20)}
+                    projectedUnits={dashboardStats.stats.projectedMonthlyUsage || dashboardStats.stats.currentUsage * 4}
                   />
                 </div>
               )}
 
-              {/* Alerts Panel */}
+              {/* Alerts Panel - Adjust column span based on analytics data */}
               <div className={dashboardStats?.stats.currentUsage > 0 ? "" : "lg:col-span-2"}>
                 <Card className="card-premium">
                   <div className="space-y-6">
@@ -348,9 +421,11 @@ const [alerts, setAlerts] = useState<any[]>([]);
                       <tr>
                         <th className="text-left py-4 px-6 text-foreground-secondary font-medium">Date</th>
                         <th className="text-left py-4 px-6 text-foreground-secondary font-medium">Meter</th>
+                        <th className="text-left py-4 px-6 text-foreground-secondary font-medium">Week</th>
                         <th className="text-left py-4 px-6 text-foreground-secondary font-medium">Reading</th>
                         <th className="text-left py-4 px-6 text-foreground-secondary font-medium">Usage</th>
                         <th className="text-left py-4 px-6 text-foreground-secondary font-medium">Cost</th>
+                        <th className="text-left py-4 px-6 text-foreground-secondary font-medium">Type</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -358,9 +433,25 @@ const [alerts, setAlerts] = useState<any[]>([]);
                         <tr key={index} className="border-t border-border/30 hover:bg-background-card/30 transition-colors">
                           <td className="py-4 px-6 text-foreground font-mono">{reading.date}</td>
                           <td className="py-4 px-6 text-foreground">{reading.meter}</td>
+                          <td className="py-4 px-6 text-foreground">
+                            <span className="px-2 py-1 rounded-full text-xs bg-background-card text-foreground-secondary">
+                              Week {reading.week || 1}
+                            </span>
+                          </td>
                           <td className="py-4 px-6 text-foreground font-mono">{reading.reading?.toLocaleString() || '0'}</td>
                           <td className="py-4 px-6 text-foreground font-mono">{reading.usage} kWh</td>
                           <td className="py-4 px-6 text-primary font-mono font-semibold">Rs {(reading.cost || reading.estimatedCost || 0).toLocaleString()}</td>
+                          <td className="py-4 px-6">
+                            {reading.isOfficialEndOfMonth ? (
+                              <span className="px-2 py-1 rounded-full text-xs bg-primary/10 text-primary font-medium">
+                                Official
+                              </span>
+                            ) : (
+                              <span className="px-2 py-1 rounded-full text-xs bg-background-card text-foreground-secondary">
+                                Weekly
+                              </span>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -372,6 +463,82 @@ const [alerts, setAlerts] = useState<any[]>([]);
         </main>
       </div>
     </div>
+  )
+}
+
+// Forecast Card Component
+const ForecastCard: React.FC = () => {
+  const [forecastData, setForecastData] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const fetchForecast = async () => {
+      try {
+        const response = await fetch('/api/forecast/bill')
+        if (response.ok) {
+          const data = await response.json()
+          setForecastData(data.data)
+        }
+      } catch (error) {
+        console.error('Failed to fetch forecast:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchForecast()
+  }, [])
+
+  if (loading) {
+    return (
+      <Card className="card-premium">
+        <div className="animate-pulse space-y-4">
+          <div className="h-6 bg-background-card rounded w-1/2"></div>
+          <div className="h-8 bg-background-card rounded w-1/3"></div>
+        </div>
+      </Card>
+    )
+  }
+
+  if (!forecastData) return null
+
+  return (
+    <Card className="card-premium">
+      <div className="space-y-6">
+        <div className="flex items-center space-x-3">
+          <div className="bg-gradient-to-r from-accent-emerald to-primary p-2 rounded-xl">
+            <Target className="h-6 w-6 text-white" />
+          </div>
+          <div>
+            <h2 className="text-xl font-semibold text-foreground font-sora">Monthly Forecast</h2>
+            <p className="text-foreground-secondary text-sm">Projected bill & usage</p>
+          </div>
+        </div>
+        
+        <div className="grid grid-cols-2 gap-4">
+          <div className="text-center p-4 rounded-2xl bg-gradient-to-br from-primary/10 to-accent-cyan/10 border border-primary/20">
+            <p className="text-sm text-foreground-secondary mb-2">Expected Usage</p>
+            <p className="text-3xl font-bold text-foreground font-mono">{forecastData.forecast.usage.expected}</p>
+            <p className="text-xs text-foreground-tertiary">kWh this month</p>
+          </div>
+          <div className="text-center p-4 rounded-2xl bg-gradient-to-br from-accent-amber/10 to-accent-pink/10 border border-accent-amber/20">
+            <p className="text-sm text-foreground-secondary mb-2">Expected Bill</p>
+            <p className="text-3xl font-bold text-primary font-mono">Rs {forecastData.forecast.bill.expected.toLocaleString()}</p>
+            <p className="text-xs text-foreground-tertiary">projected total</p>
+          </div>
+        </div>
+
+        {forecastData.comparison.vsLastMonth && (
+          <div className="text-center p-3 rounded-xl bg-background-card/30">
+            <p className="text-sm text-foreground-secondary">vs Last Month: 
+              <span className={`ml-2 font-semibold ${forecastData.comparison.vsLastMonth > 0 ? 'text-accent-amber' : 'text-primary'}`}>
+                {forecastData.comparison.vsLastMonth > 0 ? '+' : ''}{forecastData.comparison.vsLastMonth}%
+              </span>
+            </p>
+          </div>
+        )}
+      </div>
+    </Card>
   )
 }
 

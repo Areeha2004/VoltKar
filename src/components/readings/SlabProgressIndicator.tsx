@@ -1,6 +1,6 @@
 import React from 'react'
 import { AlertTriangle, TrendingUp, Zap } from 'lucide-react'
-import { getCurrentSlab, TARIFF_SLABS, getSlabWarningMessage } from '../../lib/slabCalculations'
+import { getCurrentSlab, getSlabWarningMessage, DEFAULT_TARIFF } from '../../lib/tariffEngine'
 import Card from '../ui/Card'
 
 interface SlabProgressIndicatorProps {
@@ -9,7 +9,18 @@ interface SlabProgressIndicatorProps {
   className?: string
 }
 
-const SlabProgressIndicator: React.FC<SlabProgressIndicatorProps> = ({
+/*************  ✨ Windsurf Command ⭐  *************/
+/**
+ * SlabProgressIndicator component shows the current slab progress, current and next tariff rates,
+ * warning alerts, and monthly projection.
+ *
+ * @param {SlabProgressIndicatorProps} props - The component props:
+ *                                            - currentUnits: current usage in kWh
+ *                                            - projectedUnits: projected usage in kWh (optional)
+ *                                            - className: additional CSS classes for the component
+ * @returns {React.ReactElement | null} The rendered component or null if current slab info is not available
+ */
+/*******  f8ddb779-e0c9-4f2c-8583-fa7b73f05da2  *******/const SlabProgressIndicator: React.FC<SlabProgressIndicatorProps> = ({
   currentUnits,
   projectedUnits,
   className = ''
@@ -21,7 +32,7 @@ const SlabProgressIndicator: React.FC<SlabProgressIndicatorProps> = ({
   if (!currentSlabInfo) return null
 
   const { slab: currentSlab, index: currentSlabIndex } = currentSlabInfo
-  const nextSlab = TARIFF_SLABS[currentSlabIndex + 1]
+  const nextSlab = DEFAULT_TARIFF.slabs[currentSlabIndex + 1]
   
   // Calculate progress within current slab
   const slabRange = currentSlab.max - currentSlab.min + 1
@@ -138,7 +149,7 @@ const SlabProgressIndicator: React.FC<SlabProgressIndicatorProps> = ({
       <div className="pt-4 border-t border-border/30">
         <p className="text-sm font-medium text-foreground-secondary mb-3">All Tariff Slabs</p>
         <div className="space-y-2">
-          {TARIFF_SLABS.map((slab, index) => (
+          {DEFAULT_TARIFF.slabs.map((slab, index) => (
             <div 
               key={index}
               className={`flex justify-between items-center p-2 rounded-lg transition-colors ${

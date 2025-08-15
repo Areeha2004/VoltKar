@@ -1,19 +1,17 @@
 "use client";
-import React from 'react'
-import { useState , useEffect} from "react";
-import { useSession, signOut } from "next-auth/react";
+import React, { useState, useEffect } from "react";
+import { useSession } from "next-auth/react";
 import Image from "next/image";
-
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { 
- 
-  Zap, 
-  TrendingUp, 
-  DollarSign, 
-  Clock, 
-  Plus, 
-  Settings, 
+
+import {
+  Zap,
+  TrendingUp,
+  DollarSign,
+  Clock,
+  Plus,
+  Settings,
   AlertTriangle,
   CheckCircle,
   Info,
@@ -22,74 +20,101 @@ import {
   ArrowDown,
   Activity,
   Lightbulb
+} from "lucide-react";
 
-} from 'lucide-react'
-import Navbar from '../../components/layout/Navbar'
-import Sidebar from '../../components/layout/Sidebar'
-import Card from '../../components/ui/Card'
-import Button from '../../components/ui/Button'
-import SlabProgressIndicator from '../../components/readings/SlabProgressIndicator'
-import SlabWarningAlert from '../../components/ui/SlabWarningAlert'
-import { tariffEngine } from '../../lib/tariffEngine'
+import Navbar from "../../components/layout/Navbar";
+import Sidebar from "../../components/layout/Sidebar";
+import Card from "../../components/ui/Card";
+import Button from "../../components/ui/Button";
+import SlabProgressIndicator from "../../components/readings/SlabProgressIndicator";
+import SlabWarningAlert from "../../components/ui/SlabWarningAlert";
+import SetBudgetButton from "../../components/ui/SetBudgetButton";
 
-const Dashboard: React.FC = () => {
+import { generateUsageInsights } from "../../lib/insights";
+import { MonthlyBreakdown, Reading } from "@/lib/analytics";
+
+interface DashboardProps {
+  breakdown: MonthlyBreakdown;
+  readings: Reading[];
+}
+localStorage.removeItem("monthlyBudgetKwh");
+
+const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
   const { data: session, status } = useSession();
-  const name = session?.user?.name
-    ?? session?.user?.email?.split("@")[0]
-    ?? "User";
+  const name =
+    session?.user?.name ??
+    session?.user?.email?.split("@")[0] ??
+    "User";
 
   const image = session?.user?.image;
+  const initials = name.split(" ").map((p) => p[0]).join("").slice(0, 2);
 
-  // Fallback initials
-  const initials = name
-    .split(" ")
-    .map(p => p[0])
-    .join("")
-    .slice(0, 2)
-  const [dashboardStats, setDashboardStats] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
-const [alerts, setAlerts] = useState<any[]>([]);
-  const [analyticsData, setAnalyticsData] = useState<any>(null)
+  const [dashboardStats, setDashboardStats] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [alerts, setAlerts] = useState<any[]>([]);
+  const [analyticsData, setAnalyticsData] = useState<any>(null);
+  const [costInsights, setCostInsights] = useState<any[]>([]);
+  const [insights, setInsights] = useState<any[]>([]);
+
+  // Compute insights once breakdown + readings are available
+  useEffect(() => {
+    if (breakdown && readings) {
+      const targetKwh = Number(localStorage.getItem("monthlyBudgetKwh")) || undefined;
+      setInsights(generateUsageInsights(breakdown, readings, targetKwh));
+    }
+  }, [breakdown, readings]);
+
+  const showSetBudget = insights.some((i) => i.id === "set-budget-tip");
+
   // Fetch dashboard stats
   useEffect(() => {
     const fetchDashboardStats = async () => {
       try {
-        const response = await fetch('/api/dashboard/stats')
+        const response = await fetch("/api/dashboard/stats");
         if (response.ok) {
-          const data = await response.json()
-          setDashboardStats(data)
-          setAlerts(data.alerts || [])
+          const data = await response.json();
+          setDashboardStats(data);
+          setAlerts(data.alerts || []);
+        }
+
+        // Fetch cost insights for mini cards
+        const costResponse = await fetch("/api/analytics/costs");
+        if (costResponse.ok) {
+          const costData = await costResponse.json();
+          setCostInsights(costData.data.insights?.slice(0, 2) || []);
         }
       } catch (error) {
-        console.error('Failed to fetch dashboard stats:', error)
+        console.error("Failed to fetch dashboard stats:", error);
       } finally {
-        setLoading(false)
+        setLoading(false);
       }
-    }
+    };
 
     if (session?.user?.id) {
-      fetchDashboardStats()
+      fetchDashboardStats();
     }
-  }, [session?.user?.id])
-   
+  }, [session?.user?.id]);
+
   // Fetch analytics data
   useEffect(() => {
     const fetchAnalytics = async () => {
       try {
-        const response = await fetch('/api/analytics/usage')
+        const response = await fetch("/api/analytics/usage");
         if (response.ok) {
-          const data = await response.json()
-          setAnalyticsData(data.data)
+          const data = await response.json();
+          setAnalyticsData(data.data);
         }
       } catch (error) {
-        console.error('Failed to fetch analytics:', error)
+        console.error("Failed to fetch analytics:", error);
       }
-    }
+    };
 
     if (session?.user?.id) {
-      fetchAnalytics()
+      fetchAnalytics();
     }
-  }, [session?.user?.id])
+  }, [session?.user?.id]);
+
+
 
   const getMetrics = () => {
     if (!dashboardStats) {
@@ -369,6 +394,29 @@ const [alerts, setAlerts] = useState<any[]>([]);
                           </div>
                         </div>
                       ))}
+                      
+                      {/* Cost Insights Mini Cards */}
+                      {costInsights.map((insight, index) => (
+                        <div key={`cost-${index}`} className={`flex items-start space-x-4 p-6 rounded-2xl bg-background-card/50 backdrop-blur-sm border-l-4 ${
+                          insight.type === 'warning' ? 'border-l-accent-amber' :
+                          insight.type === 'success' ? 'border-l-primary' :
+                          'border-l-accent-blue'
+                        } animate-fade-in`} style={{ animationDelay: `${(alerts.length + index) * 0.1}s` }}>
+                          <div className="flex-shrink-0 mt-1">
+                            {insight.type === 'warning' ? <AlertTriangle className="h-5 w-5 text-accent-amber" /> :
+                             insight.type === 'success' ? <CheckCircle className="h-5 w-5 text-primary" /> :
+                             <Info className="h-5 w-5 text-accent-blue" />}
+                          </div>
+                          <div className="flex-1 space-y-2">
+                            <h3 className="font-semibold text-foreground text-lg">{insight.title}</h3>
+                            <p className="text-foreground-secondary leading-relaxed">{insight.message}</p>
+                            {insight.impact && (
+                              <p className="text-primary text-sm font-medium">{insight.impact}</p>
+                            )}
+                            <p className="text-foreground-muted text-sm">Cost Analysis</p>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                 </Card>
@@ -459,6 +507,13 @@ const [alerts, setAlerts] = useState<any[]>([]);
                 </div>
               </div>
             </Card>
+            <div>
+  {insights.map((insight) => (
+        <div key={insight.id}>{insight.title}</div>
+      ))}
+
+      {showSetBudget && <SetBudgetButton />}
+</div>
           </div>
         </main>
       </div>

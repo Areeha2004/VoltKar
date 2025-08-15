@@ -1,18 +1,21 @@
 'use client'
 import React, { useState } from 'react'
 import { useEffect } from 'react'
-import { TrendingUp, Calendar, Download, Target, Zap, DollarSign, Activity, Brain, Sparkles, ArrowUp, ArrowDown } from 'lucide-react'
+import { TrendingUp, Calendar, Download, Target, Zap, DollarSign, Activity, Brain, Sparkles, ArrowUp, ArrowDown, AlertTriangle, CheckCircle, Info } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, Area, AreaChart } from 'recharts'
 import Navbar from '../../components/layout/Navbar'
 import Sidebar from '../../components/layout/Sidebar'
 import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
 import { BarChart3 } from 'lucide-react'
+
 const AnalyticsPage: React.FC = () => {
   const [timeframe, setTimeframe] = useState('monthly')
   const [forecastMonths, setForecastMonths] = useState(3)
   const [analyticsData, setAnalyticsData] = useState<any>(null)
   const [forecastData, setForecastData] = useState<any>(null)
+  const [costData, setCostData] = useState<any>(null)
+  const [comparisonData, setComparisonData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
 
   // Sample data for charts
@@ -94,6 +97,20 @@ const AnalyticsPage: React.FC = () => {
         if (forecastResponse.ok) {
           const forecastResult = await forecastResponse.json()
           setForecastData(forecastResult.data)
+        }
+        
+        // Fetch cost analytics
+        const costResponse = await fetch('/api/analytics/costs')
+        if (costResponse.ok) {
+          const costResult = await costResponse.json()
+          setCostData(costResult.data)
+        }
+        
+        // Fetch comparison analytics
+        const comparisonResponse = await fetch('/api/analytics/comparisons?type=all')
+        if (comparisonResponse.ok) {
+          const comparisonResult = await comparisonResponse.json()
+          setComparisonData(comparisonResult.data)
         }
       } catch (error) {
         console.error('Failed to fetch analytics data:', error)
@@ -190,14 +207,24 @@ const AnalyticsPage: React.FC = () => {
                   description: 'This month'
                 },
                 { 
-                  title: 'Projected Bill', 
-                  value: forecastData?.forecast?.bill?.expected?.toLocaleString() || '0', 
+                  title: 'Actual Cost', 
+                  value: costData?.costs?.actualToDateCost?.toLocaleString() || '0', 
                   unit: 'PKR', 
-                  change: forecastData?.comparison?.vsLastMonth ? `${forecastData.comparison.vsLastMonth > 0 ? '+' : ''}${forecastData.comparison.vsLastMonth}%` : '0%', 
-                  changeType: forecastData?.comparison?.vsLastMonth > 0 ? 'increase' : 'decrease',
+                  change: costData?.comparison?.vsLastMonth ? `${costData.comparison.vsLastMonth > 0 ? '+' : ''}${costData.comparison.vsLastMonth}%` : '0%', 
+                  changeType: costData?.comparison?.vsLastMonth > 0 ? 'increase' : 'decrease',
                   icon: DollarSign,
                   gradient: 'from-primary to-accent-cyan',
-                  description: 'Based on current usage'
+                  description: 'Month to date'
+                },
+                {
+                  title: 'Projected Bill', 
+                  value: costData?.costs?.projectedCost?.toLocaleString() || '0', 
+                  unit: 'PKR', 
+                  change: costData?.comparison?.vsLastMonth ? `${costData.comparison.vsLastMonth > 0 ? '+' : ''}${costData.comparison.vsLastMonth}%` : '0%', 
+                  changeType: costData?.comparison?.vsLastMonth > 0 ? 'increase' : 'decrease',
+                  icon: TrendingUp,
+                  gradient: 'from-accent-amber to-accent-pink',
+                  description: 'Full month projection'
                 },
                 { 
                   title: 'Efficiency Score', 
@@ -208,16 +235,6 @@ const AnalyticsPage: React.FC = () => {
                   icon: Target,
                   gradient: 'from-accent-emerald to-primary',
                   description: 'Above average'
-                },
-                { 
-                  title: 'Cost per kWh', 
-                  value: analyticsData?.metrics?.costPerKwh?.toString() || '0', 
-                  unit: 'PKR', 
-                  change: '-2%', 
-                  changeType: 'decrease',
-                  icon: Activity,
-                  gradient: 'from-accent-amber to-accent-pink',
-                  description: 'Optimized rate'
                 }
               ].map((metric, index) => (
                 <Card key={index} className="card-premium animate-fade-in" ><div style={{ animationDelay: `${index * 0.1}s` }}>
@@ -340,6 +357,53 @@ const AnalyticsPage: React.FC = () => {
                 </Card>
               </div>
 
+              {/* Cost Analytics */}
+              {costData && (
+                <Card className="card-premium">
+                  <div className="space-y-6">
+                    <div className="flex items-center space-x-3">
+                      <div className="bg-gradient-to-r from-accent-amber to-accent-pink p-2 rounded-xl">
+                        <DollarSign className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <h2 className="text-xl font-semibold text-foreground font-sora">Cost Analytics</h2>
+                        <p className="text-foreground-secondary text-sm">Detailed cost breakdown</p>
+                      </div>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="p-4 rounded-2xl bg-background-card/30">
+                        <p className="text-sm text-foreground-secondary">Actual Cost</p>
+                        <p className="text-2xl font-bold text-foreground">Rs {costData.costs.actualToDateCost.toLocaleString()}</p>
+                      </div>
+                      <div className="p-4 rounded-2xl bg-background-card/30">
+                        <p className="text-sm text-foreground-secondary">Projected</p>
+                        <p className="text-2xl font-bold text-primary">Rs {costData.costs.projectedCost.toLocaleString()}</p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="flex justify-between">
+                        <span className="text-foreground-secondary">Daily Average:</span>
+                        <span className="font-semibold text-foreground">Rs {Math.round(costData.costs.averageDailyCost)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-foreground-secondary">Cost per kWh:</span>
+                        <span className="font-semibold text-foreground">Rs {costData.costs.costPerKwh}</span>
+                      </div>
+                      {costData.comparison.vsLastMonth && (
+                        <div className="flex justify-between">
+                          <span className="text-foreground-secondary">vs Last Month:</span>
+                          <span className={`font-semibold ${costData.comparison.vsLastMonth > 0 ? 'text-accent-amber' : 'text-primary'}`}>
+                            {costData.comparison.vsLastMonth > 0 ? '+' : ''}{costData.comparison.vsLastMonth}%
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              )}
+
               {/* Real Analytics Data */}
               {analyticsData && (
                 <Card className="card-premium">
@@ -406,6 +470,178 @@ const AnalyticsPage: React.FC = () => {
                 </div>
               </Card>
             </div>
+
+            {/* Comparison Analytics */}
+            {comparisonData && comparisonData.comparisons && (
+              <Card className="card-premium">
+                <div className="space-y-6">
+                  <div className="flex items-center space-x-3">
+                    <div className="bg-gradient-to-r from-accent-blue to-accent-purple p-3 rounded-2xl">
+                      <BarChart3 className="h-7 w-7 text-white" />
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-semibold text-foreground font-sora">Usage Comparisons</h2>
+                      <p className="text-foreground-secondary">Month-over-month and year-over-year trends</p>
+                    </div>
+                  </div>
+                  
+                  <div className="grid md:grid-cols-3 gap-6">
+                    {Array.isArray(comparisonData.comparisons) ? comparisonData.comparisons.map((comparison: any, index: number) => (
+                      <div key={index} className="p-6 rounded-2xl bg-background-card/30 border border-border/30">
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between">
+                            <h3 className="font-semibold text-foreground">{comparison.comparisonType}</h3>
+                            <div className={`px-2 py-1 rounded-full text-xs font-medium ${
+                              comparison.trend === 'increasing' ? 'text-accent-amber bg-accent-amber/10' :
+                              comparison.trend === 'decreasing' ? 'text-primary bg-primary/10' :
+                              'text-foreground-secondary bg-background-secondary'
+                            }`}>
+                              {comparison.trend}
+                            </div>
+                          </div>
+                          
+                          <div className="space-y-3">
+                            <div className="flex justify-between">
+                              <span className="text-sm text-foreground-secondary">Usage Change:</span>
+                              <span className={`font-semibold ${
+                                comparison.percentageChange.usage > 0 ? 'text-accent-amber' : 'text-primary'
+                              }`}>
+                                {comparison.percentageChange.usage > 0 ? '+' : ''}{comparison.percentageChange.usage}%
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-sm text-foreground-secondary">Cost Change:</span>
+                              <span className={`font-semibold ${
+                                comparison.percentageChange.cost > 0 ? 'text-accent-amber' : 'text-primary'
+                              }`}>
+                                {comparison.percentageChange.cost > 0 ? '+' : ''}{comparison.percentageChange.cost}%
+                              </span>
+                            </div>
+                          </div>
+                          
+                          <div className="pt-3 border-t border-border/30">
+                            <div className="text-center">
+                              <p className="text-lg font-bold text-foreground">{comparison.currentPeriod.usage} kWh</p>
+                              <p className="text-xs text-foreground-secondary">Current Period</p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )) : (
+                      <div className="p-6 rounded-2xl bg-background-card/30 border border-border/30">
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between">
+                            <h3 className="font-semibold text-foreground">{comparisonData.comparisons.comparisonType}</h3>
+                            <div className={`px-2 py-1 rounded-full text-xs font-medium ${
+                              comparisonData.comparisons.trend === 'increasing' ? 'text-accent-amber bg-accent-amber/10' :
+                              comparisonData.comparisons.trend === 'decreasing' ? 'text-primary bg-primary/10' :
+                              'text-foreground-secondary bg-background-secondary'
+                            }`}>
+                              {comparisonData.comparisons.trend}
+                            </div>
+                          </div>
+                          
+                          <div className="space-y-3">
+                            <div className="flex justify-between">
+                              <span className="text-sm text-foreground-secondary">Usage Change:</span>
+                              <span className={`font-semibold ${
+                                comparisonData.comparisons.percentageChange.usage > 0 ? 'text-accent-amber' : 'text-primary'
+                              }`}>
+                                {comparisonData.comparisons.percentageChange.usage > 0 ? '+' : ''}{comparisonData.comparisons.percentageChange.usage}%
+                              </span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-sm text-foreground-secondary">Cost Change:</span>
+                              <span className={`font-semibold ${
+                                comparisonData.comparisons.percentageChange.cost > 0 ? 'text-accent-amber' : 'text-primary'
+                              }`}>
+                                {comparisonData.comparisons.percentageChange.cost > 0 ? '+' : ''}{comparisonData.comparisons.percentageChange.cost}%
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            )}
+
+            {/* Insights Section */}
+            {(costData?.insights || comparisonData?.insights) && (
+              <Card className="card-premium">
+                <div className="space-y-6">
+                  <div className="flex items-center space-x-3">
+                    <div className="bg-gradient-to-r from-accent-purple to-accent-pink p-3 rounded-2xl">
+                      <Brain className="h-7 w-7 text-white" />
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-semibold text-foreground font-sora">Smart Insights</h2>
+                      <p className="text-foreground-secondary">AI-powered recommendations and alerts</p>
+                    </div>
+                  </div>
+                  
+                  <div className="grid md:grid-cols-2 gap-6">
+                    {/* Cost Insights */}
+                    {costData?.insights && costData.insights.map((insight: any, index: number) => (
+                      <div key={`cost-${index}`} className={`p-5 rounded-2xl border-l-4 transition-all duration-300 hover:shadow-card animate-fade-in ${
+                        insight.type === 'warning' ? 'border-l-accent-amber bg-accent-amber/5' :
+                        insight.type === 'success' ? 'border-l-primary bg-primary/5' :
+                        'border-l-accent-blue bg-accent-blue/5'
+                      }`} style={{ animationDelay: `${index * 0.1}s` }}>
+                        <div className="flex items-start space-x-4">
+                          <div className={`p-2 rounded-lg ${
+                            insight.type === 'warning' ? 'bg-accent-amber/20 text-accent-amber' :
+                            insight.type === 'success' ? 'bg-primary/20 text-primary' :
+                            'bg-accent-blue/20 text-accent-blue'
+                          }`}>
+                            {insight.type === 'warning' ? <AlertTriangle className="h-5 w-5" /> :
+                             insight.type === 'success' ? <CheckCircle className="h-5 w-5" /> :
+                             <Info className="h-5 w-5" />}
+                          </div>
+                          <div className="space-y-2">
+                            <h4 className="font-semibold text-foreground">{insight.title}</h4>
+                            <p className="text-sm text-foreground-secondary leading-relaxed">{insight.message}</p>
+                            {insight.impact && (
+                              <div className="flex items-center space-x-2">
+                                <Sparkles className="h-4 w-4 text-primary" />
+                                <span className="text-sm font-medium text-primary">{insight.impact}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    
+                    {/* Comparison Insights */}
+                    {comparisonData?.insights && comparisonData.insights.map((insight: any, index: number) => (
+                      <div key={`comparison-${index}`} className={`p-5 rounded-2xl border-l-4 transition-all duration-300 hover:shadow-card animate-fade-in ${
+                        insight.type === 'warning' ? 'border-l-accent-amber bg-accent-amber/5' :
+                        insight.type === 'success' ? 'border-l-primary bg-primary/5' :
+                        'border-l-accent-blue bg-accent-blue/5'
+                      }`} style={{ animationDelay: `${(costData?.insights?.length || 0) + index * 0.1}s` }}>
+                        <div className="flex items-start space-x-4">
+                          <div className={`p-2 rounded-lg ${
+                            insight.type === 'warning' ? 'bg-accent-amber/20 text-accent-amber' :
+                            insight.type === 'success' ? 'bg-primary/20 text-primary' :
+                            'bg-accent-blue/20 text-accent-blue'
+                          }`}>
+                            <TrendingUp className="h-5 w-5" />
+                          </div>
+                          <div className="space-y-2">
+                            <h4 className="font-semibold text-foreground">{insight.title}</h4>
+                            <p className="text-sm text-foreground-secondary leading-relaxed">{insight.message}</p>
+                            <div className="text-xs text-foreground-tertiary">
+                              {insight.comparisonType} Analysis
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </Card>
+            )}
 
             <div className="grid lg:grid-cols-2 gap-8">
               {/* Daily Usage Pattern */}

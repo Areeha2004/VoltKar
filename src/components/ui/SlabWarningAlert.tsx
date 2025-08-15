@@ -1,6 +1,6 @@
 import React from 'react'
 import { AlertTriangle, X, TrendingUp, Lightbulb } from 'lucide-react'
-import { getSlabWarningMessage, getCurrentSlab, TARIFF_SLABS } from '../../lib/slabCalculations'
+import { getSlabWarningMessage, getCurrentSlab, DEFAULT_TARIFF } from '../../lib/tariffEngine'
 
 interface SlabWarningAlertProps {
   units: number
@@ -21,7 +21,7 @@ const SlabWarningAlert: React.FC<SlabWarningAlertProps> = ({
   if (!warningMessage || !currentSlabInfo) return null
 
   const { slab: currentSlab, index: currentSlabIndex } = currentSlabInfo
-  const nextSlab = TARIFF_SLABS[currentSlabIndex + 1]
+  const nextSlab = DEFAULT_TARIFF.slabs[currentSlabIndex + 1]
   const unitsToNextSlab = nextSlab ? nextSlab.min - units : 0
 
   const suggestions = [

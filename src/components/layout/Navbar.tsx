@@ -29,24 +29,35 @@ const { data: session, status } = useSession();
     <nav className="sticky top-0 z-50 glass-card border-b border-border/50 backdrop-blur-3xl">
       <div className="max-w-7xl mx-auto px-6">
         <div className="flex items-center justify-between h-20">
-          {/* Logo */}
-          <Link href="/" className="flex items-center space-x-3">
-            <div className="relative">
-              <div className="absolute inset-0 bg-gradient-to-r from-primary to-accent-cyan rounded-2xl blur-lg opacity-50" />
-              <div className="relative bg-gradient-to-r from-primary to-accent-cyan p-3 rounded-2xl">
-                <Zap className="h-6 w-6 text-white" />
-              </div>
-            </div>
-            <span className="text-2xl font-bold text-foreground font-sora">Volt</span>
-          </Link>
 
-          {/* Desktop Navigation */}
-          <div className="hidden md:flex items-center space-x-8">
-            <Link href="/dashboard" className="nav-link text-lg">Dashboard</Link>
-            <Link href="/analytics" className="nav-link text-lg">Analytics</Link>
-            <Link href="/devices" className="nav-link text-lg">Devices</Link>
-            <Link href="/challenges" className="nav-link text-lg">Challenges</Link>
-          </div>
+{/* Logo */}
+<Link href="/" className="flex items-center space-x-3">
+  {/* Transparent wrapper */}
+  <div className="p-3 rounded-2xl bg-transparent">
+    {/* Inline SVG with explicit Tailwind color hexes */}
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      className="h-6 w-6"
+    >
+      <defs>
+        <linearGradient id="zap-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+          {/* Replace these with your exact Tailwind primary/accent-cyan hexes */}
+          <stop offset="0%" stopColor="#0ee9abff" />
+          <stop offset="100%" stopColor="#06b6d4" />
+        </linearGradient>
+      </defs>
+
+      {/* Lucide-react “Zap” polygon path */}
+      <polygon
+        points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"
+        fill="url(#zap-grad)"
+      />
+    </svg>
+  </div>
+
+  <span className="text-2xl font-bold text-foreground font-sora">Volt</span>
+</Link>
 
           {/* User Menu */}
           <div className="hidden md:flex items-center space-x-4">

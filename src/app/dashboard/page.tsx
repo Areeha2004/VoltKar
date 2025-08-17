@@ -31,6 +31,8 @@ import SlabProgressIndicator from "../../components/readings/SlabProgressIndicat
 import SlabWarningAlert from "../../components/ui/SlabWarningAlert";
 import SetBudgetModal from "../../components/budget/SetBudgetModal";
 import BudgetProgressCard from "../../components/budget/BudgetProgressCard";
+import AnomalyAlert from "../../components/analytics/AnomalyAlert";
+import BudgetMonitorCard from "../../components/analytics/BudgetMonitorCard";
 
 import { generateUsageInsights } from "../../lib/insights";
 import { calculateBudgetStatus, getBudgetFromStorage, generateBudgetInsights } from "../../lib/budgetManager";
@@ -60,6 +62,7 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
   const [budgetStatus, setBudgetStatus] = useState<any>(null);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [monthlyBudget, setMonthlyBudget] = useState<number | null>(null);
+  const [anomalies, setAnomalies] = useState<any[]>([]);
 
   // Load budget from localStorage
   useEffect(() => {
@@ -101,6 +104,13 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
         if (costResponse.ok) {
           const costData = await costResponse.json();
           setCostInsights(costData.data.insights?.slice(0, 2) || []);
+        }
+
+        // Fetch anomalies for dashboard
+        const anomalyResponse = await fetch("/api/analytics/anomalies");
+        if (anomalyResponse.ok) {
+          const anomalyData = await anomalyResponse.json();
+          setAnomalies(anomalyData.data.anomalies?.slice(0, 3) || []);
         }
       } catch (error) {
         console.error("Failed to fetch dashboard stats:", error);
@@ -423,7 +433,9 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
               )}
 
               {/* Forecast Card */}
-              <ForecastCard />
+              <div className={dashboardStats?.stats.currentUsage > 0 ? "" : "lg:col-span-2"}>
+                <ForecastCard />
+              </div>
 
               {/* Original Slab Progress Indicator */}
               {dashboardStats?.stats.currentUsage > 0 && (
@@ -512,6 +524,22 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
                       ))}
                     </div>
                   </div>
+
+                  {/* Anomaly Alerts */}
+                  {anomalies.length > 0 && (
+                    <div className="space-y-3">
+                      <h4 className="font-medium text-foreground">System Alerts</h4>
+                      {anomalies.map((anomaly, index) => (
+                        <AnomalyAlert
+                          key={anomaly.id}
+                          anomaly={anomaly}
+                          compact={true}
+                          className="animate-fade-in"
+                          style={{ animationDelay: `${index * 0.1}s` }}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </Card>
               </div>
 
@@ -542,6 +570,14 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
                 </div>
               </Card>
             </div>
+
+            {/* Budget Monitor Card */}
+            {monthlyBudget && (
+              <BudgetMonitorCard
+                budget={monthlyBudget}
+                onBudgetChange={handleBudgetSet}
+              />
+            )}
 
             {/* Recent Readings */}
             <Card className="card-premium">

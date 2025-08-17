@@ -1,12 +1,14 @@
 'use client'
 import React, { useState } from 'react'
 import { useEffect } from 'react'
-import { TrendingUp, Calendar, Download, Target, Zap, DollarSign, Activity, Brain, Sparkles, ArrowUp, ArrowDown, AlertTriangle, CheckCircle, Info } from 'lucide-react'
+import { TrendingUp, Calendar, Download, Target, Zap, DollarSign, Activity, Brain, Sparkles, ArrowUp, ArrowDown, AlertTriangle, CheckCircle, Info, Wallet } from 'lucide-react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, Area, AreaChart } from 'recharts'
 import Navbar from '../../components/layout/Navbar'
 import Sidebar from '../../components/layout/Sidebar'
 import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
+import SetBudgetModal from '../../components/budget/SetBudgetModal'
+import { getBudgetFromStorage, calculateBudgetStatus } from '../../lib/budgetManager'
 import { BarChart3 } from 'lucide-react'
 
 const AnalyticsPage: React.FC = () => {
@@ -17,6 +19,33 @@ const AnalyticsPage: React.FC = () => {
   const [costData, setCostData] = useState<any>(null)
   const [comparisonData, setComparisonData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [monthlyBudget, setMonthlyBudget] = useState<number | null>(null)
+  const [showBudgetModal, setShowBudgetModal] = useState(false)
+  const [budgetStatus, setBudgetStatus] = useState<any>(null)
+
+  // Load budget from localStorage
+  useEffect(() => {
+    const budget = getBudgetFromStorage()
+    setMonthlyBudget(budget)
+  }, [])
+
+  // Calculate budget status when cost data is available
+  useEffect(() => {
+    if (costData && monthlyBudget !== null) {
+      const currentDate = new Date()
+      const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate()
+      const daysElapsed = currentDate.getDate()
+      
+      const status = calculateBudgetStatus(
+        costData.data.costs.actualToDateCost,
+        costData.data.costs.projectedCost,
+        daysElapsed,
+        daysInMonth,
+        monthlyBudget || undefined
+      )
+      setBudgetStatus(status)
+    }
+  }, [costData, monthlyBudget])
 
   // Sample data for charts
   const usageData = [
@@ -122,6 +151,12 @@ const AnalyticsPage: React.FC = () => {
     fetchData()
   }, [])
 
+  const handleBudgetSet = (budget: number) => {
+    setMonthlyBudget(budget)
+    // Refresh cost data to recalculate with new budget
+    window.location.reload()
+  }
+
   // Transform analytics data for charts
   const chartData = analyticsData ? analyticsData.weeklyBreakdown.map((week: any) => ({
     week: `Week ${week.week}`,
@@ -173,6 +208,16 @@ const AnalyticsPage: React.FC = () => {
                 </div>
               </div>
               <div className="flex items-center space-x-4">
+                {!monthlyBudget && (
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setShowBudgetModal(true)}
+                    className="border-primary/50 text-primary hover:bg-primary/10"
+                  >
+                    <Wallet className="h-5 w-5 mr-2" />
+                    Set Budget
+                  </Button>
+                )}
                 <div className="flex items-center space-x-2 px-4 py-2 rounded-xl bg-background-card/50 border border-border/50">
                   <Calendar className="h-4 w-4 text-foreground-secondary" />
                   <select
@@ -226,15 +271,15 @@ const AnalyticsPage: React.FC = () => {
                   gradient: 'from-accent-amber to-accent-pink',
                   description: 'Full month projection'
                 },
-                { 
-                  title: 'Efficiency Score', 
-                  value: '82', 
-                  unit: '%', 
-                  change: '+5%', 
-                  changeType: 'decrease',
-                  icon: Target,
+                {
+                  title: 'Budget Status',
+                  value: monthlyBudget ? `${budgetStatus?.costProgress?.toFixed(0) || '0'}` : 'Not Set',
+                  unit: monthlyBudget ? '%' : '',
+                  change: budgetStatus?.onTrack ? 'On Track' : 'Over Budget',
+                  changeType: budgetStatus?.onTrack ? 'decrease' : 'increase',
+                  icon: Wallet,
                   gradient: 'from-accent-emerald to-primary',
-                  description: 'Above average'
+                  description: monthlyBudget ? `Rs ${monthlyBudget.toLocaleString()} target` : 'Set monthly target'
                 }
               ].map((metric, index) => (
                 <Card key={index} className="card-premium animate-fade-in" ><div style={{ animationDelay: `${index * 0.1}s` }}>
@@ -271,6 +316,55 @@ const AnalyticsPage: React.FC = () => {
                 </Card>
               ))}
             </div>
+
+            {/* Budget Management Section */}
+            {monthlyBudget && budgetStatus && (
+              <Card className="card-premium">
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="bg-gradient-to-r from-primary to-accent-cyan p-2 rounded-xl">
+                        <Wallet className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <h2 className="text-2xl font-semibold text-foreground font-sora">Budget Analysis</h2>
+                        <p className="text-foreground-secondary">Monthly budget: Rs {monthlyBudget.toLocaleString()}</p>
+                      </div>
+                    </div>
+                    <Button variant="outline" onClick={() => setShowBudgetModal(true)}>
+                      Edit Budget
+                    </Button>
+                  </div>
+                  
+                  <div className="grid md:grid-cols-4 gap-6">
+                    <div className="text-center p-4 rounded-2xl bg-gradient-to-br from-primary/10 to-accent-cyan/10 border border-primary/20">
+                      <p className="text-sm text-foreground-secondary mb-2">Spent</p>
+                      <p className="text-2xl font-bold text-foreground">Rs {budgetStatus.currentCost.toLocaleString()}</p>
+                      <p className="text-xs text-foreground-tertiary">{budgetStatus.costProgress.toFixed(1)}% of budget</p>
+                    </div>
+                    <div className="text-center p-4 rounded-2xl bg-gradient-to-br from-accent-amber/10 to-accent-pink/10 border border-accent-amber/20">
+                      <p className="text-sm text-foreground-secondary mb-2">Projected</p>
+                      <p className={`text-2xl font-bold ${budgetStatus.onTrack ? 'text-primary' : 'text-red-400'}`}>
+                        Rs {budgetStatus.projectedCost.toLocaleString()}
+                      </p>
+                      <p className="text-xs text-foreground-tertiary">
+                        {budgetStatus.onTrack ? 'Within budget' : `Rs ${budgetStatus.projectedOverage?.toLocaleString()} over`}
+                      </p>
+                    </div>
+                    <div className="text-center p-4 rounded-2xl bg-gradient-to-br from-accent-blue/10 to-accent-purple/10 border border-accent-blue/20">
+                      <p className="text-sm text-foreground-secondary mb-2">Daily Average</p>
+                      <p className="text-2xl font-bold text-foreground">Rs {budgetStatus.averageDailyCost}</p>
+                      <p className="text-xs text-foreground-tertiary">Target: Rs {budgetStatus.dailyBudget}</p>
+                    </div>
+                    <div className="text-center p-4 rounded-2xl bg-gradient-to-br from-accent-emerald/10 to-primary/10 border border-accent-emerald/20">
+                      <p className="text-sm text-foreground-secondary mb-2">Remaining</p>
+                      <p className="text-2xl font-bold text-primary">Rs {budgetStatus.remainingBudget.toLocaleString()}</p>
+                      <p className="text-xs text-foreground-tertiary">{budgetStatus.daysRemaining} days left</p>
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            )}
 
             <div className="grid lg:grid-cols-3 gap-8">
               {/* Usage Trends Chart */}
@@ -374,28 +468,36 @@ const AnalyticsPage: React.FC = () => {
                     <div className="grid grid-cols-2 gap-4">
                       <div className="p-4 rounded-2xl bg-background-card/30">
                         <p className="text-sm text-foreground-secondary">Actual Cost</p>
-                        <p className="text-2xl font-bold text-foreground">Rs {costData.costs.actualToDateCost.toLocaleString()}</p>
+                        <p className="text-2xl font-bold text-foreground">Rs {costData.data.costs.actualToDateCost.toLocaleString()}</p>
                       </div>
                       <div className="p-4 rounded-2xl bg-background-card/30">
                         <p className="text-sm text-foreground-secondary">Projected</p>
-                        <p className="text-2xl font-bold text-primary">Rs {costData.costs.projectedCost.toLocaleString()}</p>
+                        <p className="text-2xl font-bold text-primary">Rs {costData.data.costs.projectedCost.toLocaleString()}</p>
                       </div>
                     </div>
 
                     <div className="space-y-3">
                       <div className="flex justify-between">
                         <span className="text-foreground-secondary">Daily Average:</span>
-                        <span className="font-semibold text-foreground">Rs {Math.round(costData.costs.averageDailyCost)}</span>
+                        <span className="font-semibold text-foreground">Rs {Math.round(costData.data.costs.averageDailyCost)}</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-foreground-secondary">Cost per kWh:</span>
-                        <span className="font-semibold text-foreground">Rs {costData.costs.costPerKwh}</span>
+                        <span className="font-semibold text-foreground">Rs {costData.data.costs.costPerKwh}</span>
                       </div>
-                      {costData.comparison.vsLastMonth && (
+                      {costData.data.comparison.vsLastMonth && (
                         <div className="flex justify-between">
                           <span className="text-foreground-secondary">vs Last Month:</span>
-                          <span className={`font-semibold ${costData.comparison.vsLastMonth > 0 ? 'text-accent-amber' : 'text-primary'}`}>
-                            {costData.comparison.vsLastMonth > 0 ? '+' : ''}{costData.comparison.vsLastMonth}%
+                          <span className={`font-semibold ${costData.data.comparison.vsLastMonth > 0 ? 'text-accent-amber' : 'text-primary'}`}>
+                            {costData.data.comparison.vsLastMonth > 0 ? '+' : ''}{costData.data.comparison.vsLastMonth}%
+                          </span>
+                        </div>
+                      )}
+                      {monthlyBudget && budgetStatus && (
+                        <div className="flex justify-between">
+                          <span className="text-foreground-secondary">Budget Progress:</span>
+                          <span className={`font-semibold ${budgetStatus.onTrack ? 'text-primary' : 'text-red-400'}`}>
+                            {budgetStatus.costProgress.toFixed(1)}%
                           </span>
                         </div>
                       )}
@@ -472,7 +574,7 @@ const AnalyticsPage: React.FC = () => {
             </div>
 
             {/* Comparison Analytics */}
-            {comparisonData && comparisonData.comparisons && (
+            {comparisonData && comparisonData.data && comparisonData.data.comparisons && (
               <Card className="card-premium">
                 <div className="space-y-6">
                   <div className="flex items-center space-x-3">
@@ -486,7 +588,7 @@ const AnalyticsPage: React.FC = () => {
                   </div>
                   
                   <div className="grid md:grid-cols-3 gap-6">
-                    {Array.isArray(comparisonData.comparisons) ? comparisonData.comparisons.map((comparison: any, index: number) => (
+                    {Array.isArray(comparisonData.data.comparisons) ? comparisonData.data.comparisons.map((comparison: any, index: number) => (
                       <div key={index} className="p-6 rounded-2xl bg-background-card/30 border border-border/30">
                         <div className="space-y-4">
                           <div className="flex items-center justify-between">
@@ -531,13 +633,13 @@ const AnalyticsPage: React.FC = () => {
                       <div className="p-6 rounded-2xl bg-background-card/30 border border-border/30">
                         <div className="space-y-4">
                           <div className="flex items-center justify-between">
-                            <h3 className="font-semibold text-foreground">{comparisonData.comparisons.comparisonType}</h3>
+                            <h3 className="font-semibold text-foreground">{comparisonData.data.comparisons.comparisonType}</h3>
                             <div className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              comparisonData.comparisons.trend === 'increasing' ? 'text-accent-amber bg-accent-amber/10' :
-                              comparisonData.comparisons.trend === 'decreasing' ? 'text-primary bg-primary/10' :
+                              comparisonData.data.comparisons.trend === 'increasing' ? 'text-accent-amber bg-accent-amber/10' :
+                              comparisonData.data.comparisons.trend === 'decreasing' ? 'text-primary bg-primary/10' :
                               'text-foreground-secondary bg-background-secondary'
                             }`}>
-                              {comparisonData.comparisons.trend}
+                              {comparisonData.data.comparisons.trend}
                             </div>
                           </div>
                           
@@ -545,17 +647,17 @@ const AnalyticsPage: React.FC = () => {
                             <div className="flex justify-between">
                               <span className="text-sm text-foreground-secondary">Usage Change:</span>
                               <span className={`font-semibold ${
-                                comparisonData.comparisons.percentageChange.usage > 0 ? 'text-accent-amber' : 'text-primary'
+                                comparisonData.data.comparisons.percentageChange.usage > 0 ? 'text-accent-amber' : 'text-primary'
                               }`}>
-                                {comparisonData.comparisons.percentageChange.usage > 0 ? '+' : ''}{comparisonData.comparisons.percentageChange.usage}%
+                                {comparisonData.data.comparisons.percentageChange.usage > 0 ? '+' : ''}{comparisonData.data.comparisons.percentageChange.usage}%
                               </span>
                             </div>
                             <div className="flex justify-between">
                               <span className="text-sm text-foreground-secondary">Cost Change:</span>
                               <span className={`font-semibold ${
-                                comparisonData.comparisons.percentageChange.cost > 0 ? 'text-accent-amber' : 'text-primary'
+                                comparisonData.data.comparisons.percentageChange.cost > 0 ? 'text-accent-amber' : 'text-primary'
                               }`}>
-                                {comparisonData.comparisons.percentageChange.cost > 0 ? '+' : ''}{comparisonData.comparisons.percentageChange.cost}%
+                                {comparisonData.data.comparisons.percentageChange.cost > 0 ? '+' : ''}{comparisonData.data.comparisons.percentageChange.cost}%
                               </span>
                             </div>
                           </div>
@@ -568,7 +670,7 @@ const AnalyticsPage: React.FC = () => {
             )}
 
             {/* Insights Section */}
-            {(costData?.insights || comparisonData?.insights) && (
+            {(costData?.data?.insights || comparisonData?.data?.insights) && (
               <Card className="card-premium">
                 <div className="space-y-6">
                   <div className="flex items-center space-x-3">
@@ -583,7 +685,7 @@ const AnalyticsPage: React.FC = () => {
                   
                   <div className="grid md:grid-cols-2 gap-6">
                     {/* Cost Insights */}
-                    {costData?.insights && costData.insights.map((insight: any, index: number) => (
+                    {costData?.data?.insights && costData.data.insights.map((insight: any, index: number) => (
                       <div key={`cost-${index}`} className={`p-5 rounded-2xl border-l-4 transition-all duration-300 hover:shadow-card animate-fade-in ${
                         insight.type === 'warning' ? 'border-l-accent-amber bg-accent-amber/5' :
                         insight.type === 'success' ? 'border-l-primary bg-primary/5' :
@@ -614,12 +716,12 @@ const AnalyticsPage: React.FC = () => {
                     ))}
                     
                     {/* Comparison Insights */}
-                    {comparisonData?.insights && comparisonData.insights.map((insight: any, index: number) => (
+                    {comparisonData?.data?.insights && comparisonData.data.insights.map((insight: any, index: number) => (
                       <div key={`comparison-${index}`} className={`p-5 rounded-2xl border-l-4 transition-all duration-300 hover:shadow-card animate-fade-in ${
                         insight.type === 'warning' ? 'border-l-accent-amber bg-accent-amber/5' :
                         insight.type === 'success' ? 'border-l-primary bg-primary/5' :
                         'border-l-accent-blue bg-accent-blue/5'
-                      }`} style={{ animationDelay: `${(costData?.insights?.length || 0) + index * 0.1}s` }}>
+                      }`} style={{ animationDelay: `${(costData?.data?.insights?.length || 0) + index * 0.1}s` }}>
                         <div className="flex items-start space-x-4">
                           <div className={`p-2 rounded-lg ${
                             insight.type === 'warning' ? 'bg-accent-amber/20 text-accent-amber' :
@@ -804,6 +906,14 @@ const AnalyticsPage: React.FC = () => {
                           <span className="text-foreground-secondary">Estimated Bill:</span>
                           <span className="font-semibold text-foreground">Rs 17,800</span>
                         </div>
+                        {monthlyBudget && (
+                          <div className="flex justify-between">
+                            <span className="text-foreground-secondary">vs Budget:</span>
+                            <span className={`font-semibold ${17800 <= monthlyBudget ? 'text-primary' : 'text-red-400'}`}>
+                              {17800 <= monthlyBudget ? 'Within Budget' : `Rs ${(17800 - monthlyBudget).toLocaleString()} over`}
+                            </span>
+                          </div>
+                        )}
                         <div className="flex justify-between">
                           <span className="text-foreground-secondary">Potential Savings:</span>
                           <span className="font-semibold text-primary">Rs 2,340</span>
@@ -823,6 +933,14 @@ const AnalyticsPage: React.FC = () => {
           </div>
         </main>
       </div>
+
+      {/* Budget Modal */}
+      <SetBudgetModal
+        isOpen={showBudgetModal}
+        onClose={() => setShowBudgetModal(false)}
+        onBudgetSet={handleBudgetSet}
+        currentBudget={monthlyBudget || undefined}
+      />
     </div>
   )
 }

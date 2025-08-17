@@ -19,7 +19,8 @@ import {
   ArrowUp,
   ArrowDown,
   Activity,
-  Lightbulb
+  Lightbulb,
+  Wallet
 } from "lucide-react";
 
 import Navbar from "../../components/layout/Navbar";
@@ -28,16 +29,17 @@ import Card from "../../components/ui/Card";
 import Button from "../../components/ui/Button";
 import SlabProgressIndicator from "../../components/readings/SlabProgressIndicator";
 import SlabWarningAlert from "../../components/ui/SlabWarningAlert";
-import SetBudgetButton from "../../components/ui/SetBudgetButton";
+import SetBudgetModal from "../../components/budget/SetBudgetModal";
+import BudgetProgressCard from "../../components/budget/BudgetProgressCard";
 
 import { generateUsageInsights } from "../../lib/insights";
+import { calculateBudgetStatus, getBudgetFromStorage, generateBudgetInsights } from "../../lib/budgetManager";
 import { MonthlyBreakdown, Reading } from "@/lib/analytics";
 
 interface DashboardProps {
   breakdown: MonthlyBreakdown;
   readings: Reading[];
 }
-localStorage.removeItem("monthlyBudgetKwh");
 
 const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
   const { data: session, status } = useSession();
@@ -55,16 +57,33 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
   const [analyticsData, setAnalyticsData] = useState<any>(null);
   const [costInsights, setCostInsights] = useState<any[]>([]);
   const [insights, setInsights] = useState<any[]>([]);
+  const [budgetStatus, setBudgetStatus] = useState<any>(null);
+  const [showBudgetModal, setShowBudgetModal] = useState(false);
+  const [monthlyBudget, setMonthlyBudget] = useState<number | null>(null);
 
-  // Compute insights once breakdown + readings are available
+  // Load budget from localStorage
   useEffect(() => {
-    if (breakdown && readings) {
-      const targetKwh = Number(localStorage.getItem("monthlyBudgetKwh")) || undefined;
-      setInsights(generateUsageInsights(breakdown, readings, targetKwh));
-    }
-  }, [breakdown, readings]);
+    const budget = getBudgetFromStorage();
+    setMonthlyBudget(budget);
+  }, []);
 
-  const showSetBudget = insights.some((i) => i.id === "set-budget-tip");
+  // Calculate budget status when data is available
+  useEffect(() => {
+    if (dashboardStats && monthlyBudget !== null) {
+      const currentDate = new Date();
+      const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
+      const daysElapsed = currentDate.getDate();
+      
+      const status = calculateBudgetStatus(
+        dashboardStats.stats.costToDate,
+        dashboardStats.stats.forecastBill,
+        daysElapsed,
+        daysInMonth,
+        monthlyBudget || undefined
+      );
+      setBudgetStatus(status);
+    }
+  }, [dashboardStats, monthlyBudget]);
 
   // Fetch dashboard stats
   useEffect(() => {
@@ -114,6 +133,11 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
     }
   }, [session?.user?.id]);
 
+  const handleBudgetSet = (budget: number) => {
+    setMonthlyBudget(budget);
+    // Refresh dashboard stats to recalculate with new budget
+    window.location.reload();
+  };
 
 
   const getMetrics = () => {
@@ -245,6 +269,16 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
                 <p className="text-xl text-foreground-secondary">Here's your electricity overview for today</p>
               </div>
               <div className="flex items-center space-x-4">
+                {!monthlyBudget && (
+                  <Button 
+                    variant="outline" 
+                    onClick={() => setShowBudgetModal(true)}
+                    className="border-primary/50 text-primary hover:bg-primary/10"
+                  >
+                    <Wallet className="h-5 w-5 mr-2" />
+                    Set Budget
+                  </Button>
+                )}
                 <Button  className="premium-button h-13">
                   <Plus className="h-4 w-5 mr-2" />
                   Enter Reading
@@ -293,6 +327,40 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
                 </Card>
               ))}
             </div>
+
+            {/* Budget Progress Card */}
+            {budgetStatus && (
+              <BudgetProgressCard
+                budgetStatus={budgetStatus}
+                onSetBudget={() => setShowBudgetModal(true)}
+              />
+            )}
+
+            {/* No Budget Set Alert */}
+            {!monthlyBudget && (
+              <Card className="card-premium border-l-4 border-l-primary bg-gradient-to-r from-primary/5 to-accent-cyan/5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-4">
+                    <div className="bg-gradient-to-r from-primary to-accent-cyan p-3 rounded-2xl">
+                      <Wallet className="h-6 w-6 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-semibold text-foreground">Set Your Monthly Budget</h3>
+                      <p className="text-foreground-secondary">
+                        Track your electricity spending and get alerts when approaching your limit
+                      </p>
+                    </div>
+                  </div>
+                  <Button 
+                    className="premium-button"
+                    onClick={() => setShowBudgetModal(true)}
+                  >
+                    <Target className="h-5 w-5 mr-2" />
+                    Set Budget
+                  </Button>
+                </div>
+              </Card>
+            )}
 
             <div className="grid lg:grid-cols-3 gap-8">
               {/* Slab Warning Alert */}
@@ -382,6 +450,31 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
                     </div>
                     
                     <div className="space-y-4">
+                      {/* Budget Insights */}
+                      {budgetStatus && generateBudgetInsights(budgetStatus).map((insight, index) => (
+                        <div key={`budget-${index}`} className={`flex items-start space-x-4 p-6 rounded-2xl bg-background-card/50 backdrop-blur-sm border-l-4 ${
+                          insight.type === 'critical' ? 'border-l-red-500' :
+                          insight.type === 'warning' ? 'border-l-accent-amber' :
+                          insight.type === 'success' ? 'border-l-primary' :
+                          'border-l-accent-blue'
+                        } animate-fade-in`} style={{ animationDelay: `${index * 0.1}s` }}>
+                          <div className="flex-shrink-0 mt-1">
+                            {insight.type === 'critical' ? <AlertTriangle className="h-5 w-5 text-red-500" /> :
+                             insight.type === 'warning' ? <AlertTriangle className="h-5 w-5 text-accent-amber" /> :
+                             insight.type === 'success' ? <CheckCircle className="h-5 w-5 text-primary" /> :
+                             <Info className="h-5 w-5 text-accent-blue" />}
+                          </div>
+                          <div className="flex-1 space-y-2">
+                            <h3 className="font-semibold text-foreground text-lg">{insight.title}</h3>
+                            <p className="text-foreground-secondary leading-relaxed">{insight.message}</p>
+                            {insight.impact && (
+                              <p className="text-primary text-sm font-medium">{insight.impact}</p>
+                            )}
+                            <p className="text-foreground-muted text-sm">Budget Analysis</p>
+                          </div>
+                        </div>
+                      ))}
+
                       {alerts.map((alert, index) => (
                         <div key={index} className={`flex items-start space-x-4 p-6 rounded-2xl bg-background-card/50 backdrop-blur-sm ${getAlertBorder(alert.priority)} animate-fade-in`} style={{ animationDelay: `${index * 0.1}s` }}>
                           <div className="flex-shrink-0 mt-1">
@@ -507,16 +600,17 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
                 </div>
               </div>
             </Card>
-            <div>
-  {insights.map((insight) => (
-        <div key={insight.id}>{insight.title}</div>
-      ))}
-
-      {showSetBudget && <SetBudgetButton />}
-</div>
           </div>
         </main>
       </div>
+
+      {/* Budget Modal */}
+      <SetBudgetModal
+        isOpen={showBudgetModal}
+        onClose={() => setShowBudgetModal(false)}
+        onBudgetSet={handleBudgetSet}
+        currentBudget={monthlyBudget || undefined}
+      />
     </div>
   )
 }

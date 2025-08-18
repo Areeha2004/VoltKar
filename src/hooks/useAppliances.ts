@@ -12,7 +12,8 @@ export interface Appliance {
   estimatedKwh: number
   contribution: number
   estimatedCost: number
-  efficiency: 'excellent' | 'good' | 'fair' | 'poor'
+  efficiency: string
+  costPerKwh: number
   createdAt: string
   optimizationSuggestions?: string[]
 }

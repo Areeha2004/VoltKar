@@ -92,17 +92,21 @@ model Forecast {
 }
 
 model Appliance {
-  id           String   @id @default(uuid())
-  userId       String
-  name         String
-  wattage      Float
-  hoursPerDay  Float
-  daysPerMonth Int
-  estimatedKwh Float?
-  createdAt    DateTime @default(now())
+  id             String   @id @default(uuid())
+  userId         String
+  name           String
+  category       String   // e.g. "AC", "Fridge", "Fan", "Light"
+  type           String   // e.g. "Inverter", "Non-Inverter" (or "Smart", "Regular")
+  wattage        Float    // rated power consumption (W)
+  hoursPerDay    Float
+  daysPerMonth   Int
+  estimatedKwh   Float?   // auto-calculated: (wattage * hoursPerDay * daysPerMonth)/1000
+  contribution   Float?   // percentage contribution to user’s monthly bill
+  createdAt      DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id])
 }
+
 
 model AnomalyDetection {
   id           String   @id @default(uuid())

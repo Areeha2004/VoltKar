@@ -27,7 +27,7 @@ const Sidebar: React.FC = () => {
     { name: 'Analytics', href: '/analytics', icon: BarChart3 },
     { name: 'Reading Entry', href: '/readings', icon: Home },
     { name: 'Devices', href: '/devices', icon: Lightbulb },
-    { name: 'Dual-Meter', href: '/dual-meter', icon: Zap },
+    { name: 'Optimization', href: '/optimization', icon: Zap },
     { name: 'Challenges', href: '/challenges', icon: Trophy },
     { name: 'Settings', href: '/settings', icon: Settings },
   ]

@@ -80,40 +80,19 @@ const DevicesPage: React.FC = () => {
 
   const preview = calculatePreview()
 
-  useEffect(() => {
-  if (formData.category && metadata) {
-    const typical = getTypicalValues(formData.category)
-
-    // Only update if different (prevents infinite loop)
-    if (
-      formData.wattage !== typical.wattage.toString() ||
-      formData.hoursPerDay !== typical.hoursPerDay.toString()
-    ) {
-      setFormData(prev => ({
-        ...prev,
-        wattage: typical.wattage.toString(),
-        hoursPerDay: typical.hoursPerDay.toString(),
-      }))
-    }
-  }
-}, [formData.category, metadata, getTypicalValues])
+  // Run only when category changes
 useEffect(() => {
   if (formData.category && metadata) {
     const typical = getTypicalValues(formData.category)
 
-    // Only update if different (prevents infinite loop)
-    if (
-      formData.wattage !== typical.wattage.toString() ||
-      formData.hoursPerDay !== typical.hoursPerDay.toString()
-    ) {
-      setFormData(prev => ({
-        ...prev,
-        wattage: typical.wattage.toString(),
-        hoursPerDay: typical.hoursPerDay.toString(),
-      }))
-    }
+    setFormData(prev => ({
+      ...prev,
+      wattage: prev.wattage || typical.wattage.toString(),
+      hoursPerDay: prev.hoursPerDay || typical.hoursPerDay.toString(),
+    }))
   }
 }, [formData.category, metadata, getTypicalValues])
+
   const resetForm = () => {
     setFormData({
       name: '',

@@ -1,15 +1,12 @@
 "use client";
 import React, { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 
 import {
   Zap,
   TrendingUp,
   DollarSign,
-  Clock,
   Plus,
   Settings,
   AlertTriangle,
@@ -20,30 +17,18 @@ import {
   ArrowDown,
   Activity,
   Lightbulb,
-  Wallet
+  Wallet,
+  Clock
 } from "lucide-react";
 
 import Navbar from "../../components/layout/Navbar";
 import Sidebar from "../../components/layout/Sidebar";
 import Card from "../../components/ui/Card";
 import Button from "../../components/ui/Button";
-import SlabProgressIndicator from "../../components/readings/SlabProgressIndicator";
-import SlabWarningAlert from "../../components/ui/SlabWarningAlert";
 import SetBudgetModal from "../../components/budget/SetBudgetModal";
-import BudgetProgressCard from "../../components/budget/BudgetProgressCard";
-import AnomalyAlert from "../../components/analytics/AnomalyAlert";
-import BudgetMonitorCard from "../../components/analytics/BudgetMonitorCard";
+import { StatsBundle } from "@/lib/statsService";
 
-import { generateUsageInsights } from "../../lib/insights";
-import { calculateBudgetStatus, getBudgetFromStorage, generateBudgetInsights } from "../../lib/budgetManager";
-import { MonthlyBreakdown, Reading } from "@/lib/analytics";
-
-interface DashboardProps {
-  breakdown: MonthlyBreakdown;
-  readings: Reading[];
-}
-
-const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
+const Dashboard: React.FC = () => {
   const { data: session, status } = useSession();
   const name =
     session?.user?.name ??
@@ -53,150 +38,91 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
   const image = session?.user?.image;
   const initials = name.split(" ").map((p) => p[0]).join("").slice(0, 2);
 
-  const [dashboardStats, setDashboardStats] = useState<any>(null);
+  const [statsBundle, setStatsBundle] = useState<StatsBundle | null>(null);
   const [loading, setLoading] = useState(true);
-  const [alerts, setAlerts] = useState<any[]>([]);
-  const [analyticsData, setAnalyticsData] = useState<any>(null);
-  const [costInsights, setCostInsights] = useState<any[]>([]);
-  const [insights, setInsights] = useState<any[]>([]);
-  const [budgetStatus, setBudgetStatus] = useState<any>(null);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
-  const [monthlyBudget, setMonthlyBudget] = useState<number | null>(null);
-  const [anomalies, setAnomalies] = useState<any[]>([]);
+  const [recentReadings, setRecentReadings] = useState<any[]>([]);
 
-  // Load budget from localStorage
+  // Fetch unified stats bundle
   useEffect(() => {
-    const budget = getBudgetFromStorage();
-    setMonthlyBudget(budget);
-  }, []);
-
-  // Calculate budget status when data is available
-  useEffect(() => {
-    if (dashboardStats && monthlyBudget !== null) {
-      const currentDate = new Date();
-      const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
-      const daysElapsed = currentDate.getDate();
-      
-      const status = calculateBudgetStatus(
-        dashboardStats.stats.costToDate,
-        dashboardStats.stats.forecastBill,
-        daysElapsed,
-        daysInMonth,
-        monthlyBudget || undefined
-      );
-      setBudgetStatus(status);
-    }
-  }, [dashboardStats, monthlyBudget]);
-
-  // Fetch dashboard stats
-  useEffect(() => {
-    const fetchDashboardStats = async () => {
+    const fetchStats = async () => {
       try {
-        const response = await fetch("/api/dashboard/stats");
+        const response = await fetch("/api/stats/overview");
         if (response.ok) {
           const data = await response.json();
-          setDashboardStats(data);
-          setAlerts(data.alerts || []);
+          setStatsBundle(data.data);
         }
 
-        // Fetch cost insights for mini cards
-        const costResponse = await fetch("/api/analytics/costs");
-        if (costResponse.ok) {
-          const costData = await costResponse.json();
-          setCostInsights(costData.data.insights?.slice(0, 2) || []);
-        }
-
-        // Fetch anomalies for dashboard
-        const anomalyResponse = await fetch("/api/analytics/anomalies");
-        if (anomalyResponse.ok) {
-          const anomalyData = await anomalyResponse.json();
-          setAnomalies(anomalyData.data.anomalies?.slice(0, 3) || []);
+        // Fetch recent readings for display
+        const readingsResponse = await fetch("/api/readings?limit=5");
+        if (readingsResponse.ok) {
+          const readingsData = await readingsResponse.json();
+          setRecentReadings(readingsData.readings || []);
         }
       } catch (error) {
-        console.error("Failed to fetch dashboard stats:", error);
+        console.error("Failed to fetch dashboard data:", error);
       } finally {
         setLoading(false);
       }
     };
 
     if (session?.user?.id) {
-      fetchDashboardStats();
-    }
-  }, [session?.user?.id]);
-
-  // Fetch analytics data
-  useEffect(() => {
-    const fetchAnalytics = async () => {
-      try {
-        const response = await fetch("/api/analytics/usage");
-        if (response.ok) {
-          const data = await response.json();
-          setAnalyticsData(data.data);
-        }
-      } catch (error) {
-        console.error("Failed to fetch analytics:", error);
-      }
-    };
-
-    if (session?.user?.id) {
-      fetchAnalytics();
+      fetchStats();
     }
   }, [session?.user?.id]);
 
   const handleBudgetSet = (budget: number) => {
-    setMonthlyBudget(budget);
     // Refresh dashboard stats to recalculate with new budget
     window.location.reload();
   };
 
-
   const getMetrics = () => {
-    if (!dashboardStats) {
+    if (!statsBundle) {
       return [
-        { title: 'Current Usage', value: '0', unit: 'kWh', change: '0%', changeType: 'neutral', icon: Zap, gradient: 'from-accent-blue to-accent-purple' },
-        { title: 'Forecast Bill', value: '0', unit: 'PKR', change: '0%', changeType: 'neutral', icon: DollarSign, gradient: 'from-primary to-accent-cyan' },
-        { title: 'Cost to Date', value: '0', unit: 'PKR', change: '0%', changeType: 'neutral', icon: TrendingUp, gradient: 'from-accent-amber to-accent-pink' },
-        { title: 'Efficiency Score', value: '0', unit: '%', change: '0%', changeType: 'neutral', icon: Target, gradient: 'from-accent-emerald to-primary' }
+        { title: 'Current Usage (MTD)', value: '0', unit: 'kWh', change: '0%', changeType: 'neutral', icon: Zap, gradient: 'from-accent-blue to-accent-purple' },
+        { title: 'Forecast Bill (This Month)', value: '0', unit: 'PKR', change: '0%', changeType: 'neutral', icon: DollarSign, gradient: 'from-primary to-accent-cyan' },
+        { title: 'Cost to Date (MTD)', value: '0', unit: 'PKR', change: '0%', changeType: 'neutral', icon: TrendingUp, gradient: 'from-accent-amber to-accent-pink' },
+        { title: 'Efficiency Score (MTD)', value: '0', unit: '%', change: '0%', changeType: 'neutral', icon: Target, gradient: 'from-accent-emerald to-primary' }
       ]
     }
 
     return [
-    {
-      title: 'Current Usage',
-      value: dashboardStats.stats.currentUsage.toString(),
-      unit: 'kWh',
-      change: dashboardStats.stats.usageChange,
-      changeType: dashboardStats.stats.usageChange.startsWith('+') ? 'increase' : 'decrease',
-      icon: Zap,
-      gradient: 'from-accent-blue to-accent-purple'
-    },
-    {
-      title: 'Forecast Bill',
-      value: dashboardStats.stats.forecastBill.toLocaleString(),
-      unit: 'PKR',
-      change: dashboardStats.stats.costChange,
-      changeType: dashboardStats.stats.usageChange.startsWith('+') ? 'increase' : 'decrease',
-      icon: DollarSign,
-      gradient: 'from-primary to-accent-cyan'
-    },
-    {
-      title: 'Cost to Date',
-      value: dashboardStats.stats.costToDate.toLocaleString(),
-      unit: 'PKR',
-      change: dashboardStats.stats.costChange,
-      changeType: dashboardStats.stats.usageChange.startsWith('+') ? 'increase' : 'decrease',
-      icon: TrendingUp,
-      gradient: 'from-accent-amber to-accent-pink'
-    },
-    {
-      title: 'Efficiency Score',
-      value: dashboardStats.stats.efficiencyScore.toString(),
-      unit: '%',
-      change: '+12%',
-      changeType: 'decrease',
-      icon: Target,
-      gradient: 'from-accent-emerald to-primary'
-    }
+      {
+        title: 'Current Usage (MTD) vs Last Month (same period)',
+        value: statsBundle.mtd.usage_kwh.toString(),
+        unit: 'kWh',
+        change: `${statsBundle.mtd.vs_prev_same_period.pct_kwh > 0 ? '+' : ''}${statsBundle.mtd.vs_prev_same_period.pct_kwh}%`,
+        changeType: statsBundle.mtd.vs_prev_same_period.pct_kwh > 0 ? 'increase' : 'decrease',
+        icon: Zap,
+        gradient: 'from-accent-blue to-accent-purple'
+      },
+      {
+        title: 'Forecast Bill (This Month) vs Last Month (Full)',
+        value: statsBundle.forecast.cost_pkr.toLocaleString(),
+        unit: 'PKR',
+        change: `${statsBundle.forecast.vs_prev_full.pct_cost > 0 ? '+' : ''}${statsBundle.forecast.vs_prev_full.pct_cost}%`,
+        changeType: statsBundle.forecast.vs_prev_full.pct_cost > 0 ? 'increase' : 'decrease',
+        icon: DollarSign,
+        gradient: 'from-primary to-accent-cyan'
+      },
+      {
+        title: 'Cost to Date (MTD) vs Last Month (same period)',
+        value: statsBundle.mtd.cost_pkr.toLocaleString(),
+        unit: 'PKR',
+        change: `${statsBundle.mtd.vs_prev_same_period.pct_cost > 0 ? '+' : ''}${statsBundle.mtd.vs_prev_same_period.pct_cost}%`,
+        changeType: statsBundle.mtd.vs_prev_same_period.pct_cost > 0 ? 'increase' : 'decrease',
+        icon: TrendingUp,
+        gradient: 'from-accent-amber to-accent-pink'
+      },
+      {
+        title: 'Efficiency Score (MTD) vs Last Month (same period)',
+        value: statsBundle.mtd.efficiency_score.toString(),
+        unit: '%',
+        change: `${statsBundle.mtd.vs_prev_same_period.pct_efficiency > 0 ? '+' : ''}${statsBundle.mtd.vs_prev_same_period.pct_efficiency}%`,
+        changeType: statsBundle.mtd.vs_prev_same_period.pct_efficiency > 0 ? 'increase' : 'decrease',
+        icon: Target,
+        gradient: 'from-accent-emerald to-primary'
+      }
     ]
   }
 
@@ -339,15 +265,52 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
             </div>
 
             {/* Budget Progress Card */}
-            {budgetStatus && (
-              <BudgetProgressCard
-                budgetStatus={budgetStatus}
-                onSetBudget={() => setShowBudgetModal(true)}
-              />
+            {statsBundle?.budget.monthly_pkr && (
+              <Card className="card-premium">
+                <div className="space-y-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-3">
+                      <div className="bg-gradient-to-r from-primary to-accent-cyan p-2 rounded-xl">
+                        <Target className="h-6 w-6 text-white" />
+                      </div>
+                      <div>
+                        <h3 className="text-xl font-semibold text-foreground font-sora">Budget Status</h3>
+                        <p className="text-foreground-secondary">Rs {statsBundle.budget.monthly_pkr.toLocaleString()} monthly target</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                        statsBundle.budget.status === 'On Track' ? 'bg-primary/10 text-primary' :
+                        statsBundle.budget.status === 'At Risk' ? 'bg-accent-amber/10 text-accent-amber' :
+                        'bg-red-500/10 text-red-400'
+                      }`}>
+                        {statsBundle.budget.status}
+                      </span>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="text-center p-3 rounded-xl bg-background-card/50">
+                      <p className="text-sm text-foreground-secondary">Spent (MTD)</p>
+                      <p className="text-lg font-bold text-foreground">Rs {statsBundle.mtd.cost_pkr.toLocaleString()}</p>
+                    </div>
+                    <div className="text-center p-3 rounded-xl bg-background-card/50">
+                      <p className="text-sm text-foreground-secondary">Remaining</p>
+                      <p className="text-lg font-bold text-primary">Rs {statsBundle.budget.remaining_to_budget_pkr.toLocaleString()}</p>
+                    </div>
+                    <div className="text-center p-3 rounded-xl bg-background-card/50">
+                      <p className="text-sm text-foreground-secondary">Projected</p>
+                      <p className={`text-lg font-bold ${statsBundle.budget.status === 'Over Budget' ? 'text-red-400' : 'text-foreground'}`}>
+                        Rs {statsBundle.forecast.cost_pkr.toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </Card>
             )}
 
             {/* No Budget Set Alert */}
-            {!monthlyBudget && (
+            {!statsBundle?.budget.monthly_pkr && (
               <Card className="card-premium border-l-4 border-l-primary bg-gradient-to-r from-primary/5 to-accent-cyan/5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-4">
@@ -373,18 +336,8 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
             )}
 
             <div className="grid lg:grid-cols-3 gap-8">
-              {/* Slab Warning Alert */}
-              {dashboardStats?.stats.hasSlabWarnings && (
-                <div className="lg:col-span-3">
-                  <SlabWarningAlert 
-                    units={dashboardStats.stats.currentUsage} 
-                    showSuggestions={true}
-                  />
-                </div>
-              )}
-
-              {/* Slab Progress Indicator */}
-              {analyticsData && (
+              {/* Weekly Usage Breakdown */}
+              {statsBundle && (
                 <div className="lg:col-span-2">
                   <Card className="card-premium">
                     <div className="space-y-6">
@@ -393,38 +346,39 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
                           <TrendingUp className="h-6 w-6 text-white" />
                         </div>
                         <div>
-                          <h2 className="text-xl font-semibold text-foreground font-sora">Weekly Usage Breakdown</h2>
-                          <p className="text-foreground-secondary text-sm">Current month progress</p>
+                          <h2 className="text-xl font-semibold text-foreground font-sora">Current Month Progress</h2>
+                          <p className="text-foreground-secondary text-sm">{statsBundle.timeframeLabels.mtd} - {statsBundle.window.daysElapsed} of {statsBundle.window.daysInMonth} days</p>
                         </div>
                       </div>
                       
-                      <div className="grid grid-cols-5 gap-4">
-                        {analyticsData.weeklyBreakdown.map((week: any, index: number) => (
-                          <div key={week.week} className="text-center p-4 rounded-2xl bg-background-card/30 border border-border/30">
-                            <div className="space-y-2">
-                              <p className="text-sm text-foreground-secondary">Week {week.week}</p>
-                              <p className="text-2xl font-bold text-foreground font-mono">{week.usage}</p>
-                              <p className="text-xs text-foreground-tertiary">kWh</p>
-                              <div className="pt-2 border-t border-border/30">
-                                <p className="text-sm font-semibold text-primary">Rs {Math.round(week.cost).toLocaleString()}</p>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-4 pt-4 border-t border-border/30">
+                      <div className="grid grid-cols-3 gap-4">
                         <div className="text-center p-3 rounded-xl bg-background-card/50">
                           <p className="text-sm text-foreground-secondary">MTD Usage</p>
-                          <p className="text-xl font-bold text-foreground">{analyticsData.monthToDateUsage} kWh</p>
+                          <p className="text-xl font-bold text-foreground">{statsBundle.mtd.usage_kwh} kWh</p>
                         </div>
                         <div className="text-center p-3 rounded-xl bg-background-card/50">
                           <p className="text-sm text-foreground-secondary">MTD Cost</p>
-                          <p className="text-xl font-bold text-primary">Rs {Math.round(analyticsData.monthToDateCost).toLocaleString()}</p>
+                          <p className="text-xl font-bold text-primary">Rs {statsBundle.mtd.cost_pkr.toLocaleString()}</p>
                         </div>
                         <div className="text-center p-3 rounded-xl bg-background-card/50">
-                          <p className="text-sm text-foreground-secondary">Daily Avg</p>
-                          <p className="text-xl font-bold text-foreground">{analyticsData.averageDailyUsage} kWh</p>
+                          <p className="text-sm text-foreground-secondary">Efficiency Score</p>
+                          <p className="text-xl font-bold text-foreground">{statsBundle.mtd.efficiency_score}%</p>
+                        </div>
+                      </div>
+                      
+                      <div className="p-4 rounded-2xl bg-gradient-to-r from-background-card/50 to-background-secondary/50 border border-border/50">
+                        <div className="space-y-2">
+                          <h4 className="font-medium text-foreground">Forecast Method: {statsBundle.forecast.method.replace('_', ' ')}</h4>
+                          <div className="grid grid-cols-2 gap-4 text-sm">
+                            <div className="flex justify-between">
+                              <span className="text-foreground-secondary">Projected Usage:</span>
+                              <span className="font-semibold text-foreground">{statsBundle.forecast.usage_kwh} kWh</span>
+                            </div>
+                            <div className="flex justify-between">
+                              <span className="text-foreground-secondary">Projected Cost:</span>
+                              <span className="font-semibold text-primary">Rs {statsBundle.forecast.cost_pkr.toLocaleString()}</span>
+                            </div>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -433,22 +387,12 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
               )}
 
               {/* Forecast Card */}
-              <div className={dashboardStats?.stats.currentUsage > 0 ? "" : "lg:col-span-2"}>
+              <div className={statsBundle?.mtd.usage_kwh > 0 ? "" : "lg:col-span-2"}>
                 <ForecastCard />
               </div>
 
-              {/* Original Slab Progress Indicator */}
-              {dashboardStats?.stats.currentUsage > 0 && (
-                <div className="lg:col-span-2">
-                  <SlabProgressIndicator 
-                    currentUnits={dashboardStats.stats.currentUsage}
-                    projectedUnits={dashboardStats.stats.projectedMonthlyUsage || dashboardStats.stats.currentUsage * 4}
-                  />
-                </div>
-              )}
-
-              {/* Alerts Panel - Adjust column span based on analytics data */}
-              <div className={dashboardStats?.stats.currentUsage > 0 ? "" : "lg:col-span-2"}>
+              {/* Smart Alerts Panel */}
+              <div className={statsBundle?.mtd.usage_kwh > 0 ? "" : "lg:col-span-2"}>
                 <Card className="card-premium">
                   <div className="space-y-6">
                     <div className="flex items-center justify-between">
@@ -462,84 +406,46 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
                     </div>
                     
                     <div className="space-y-4">
-                      {/* Budget Insights */}
-                      {budgetStatus && generateBudgetInsights(budgetStatus).map((insight, index) => (
+                      {/* Data Quality Warnings */}
+                      {statsBundle?.data_quality.warnings.map((warning, index) => (
                         <div key={`budget-${index}`} className={`flex items-start space-x-4 p-6 rounded-2xl bg-background-card/50 backdrop-blur-sm border-l-4 ${
-                          insight.type === 'critical' ? 'border-l-red-500' :
-                          insight.type === 'warning' ? 'border-l-accent-amber' :
-                          insight.type === 'success' ? 'border-l-primary' :
-                          'border-l-accent-blue'
+                          'border-l-accent-amber'
                         } animate-fade-in`} style={{ animationDelay: `${index * 0.1}s` }}>
                           <div className="flex-shrink-0 mt-1">
-                            {insight.type === 'critical' ? <AlertTriangle className="h-5 w-5 text-red-500" /> :
-                             insight.type === 'warning' ? <AlertTriangle className="h-5 w-5 text-accent-amber" /> :
-                             insight.type === 'success' ? <CheckCircle className="h-5 w-5 text-primary" /> :
-                             <Info className="h-5 w-5 text-accent-blue" />}
+                            <AlertTriangle className="h-5 w-5 text-accent-amber" />
                           </div>
                           <div className="flex-1 space-y-2">
-                            <h3 className="font-semibold text-foreground text-lg">{insight.title}</h3>
-                            <p className="text-foreground-secondary leading-relaxed">{insight.message}</p>
-                            {insight.impact && (
-                              <p className="text-primary text-sm font-medium">{insight.impact}</p>
-                            )}
+                            <h3 className="font-semibold text-foreground text-lg">Data Quality Alert</h3>
+                            <p className="text-foreground-secondary leading-relaxed">{warning}</p>
+                            <p className="text-foreground-muted text-sm">System Health</p>
+                          </div>
+                        </div>
+                      ))}
+
+                      {/* Budget Status Alert */}
+                      {statsBundle?.budget.status !== 'On Track' && (
+                        <div className={`flex items-start space-x-4 p-6 rounded-2xl bg-background-card/50 backdrop-blur-sm border-l-4 ${
+                          statsBundle.budget.status === 'Over Budget' ? 'border-l-red-500' : 'border-l-accent-amber'
+                        } animate-fade-in`}>
+                          <div className="flex-shrink-0 mt-1">
+                            {statsBundle.budget.status === 'Over Budget' ? 
+                              <AlertTriangle className="h-5 w-5 text-red-500" /> :
+                              <AlertTriangle className="h-5 w-5 text-accent-amber" />
+                            }
+                          </div>
+                          <div className="flex-1 space-y-2">
+                            <h3 className="font-semibold text-foreground text-lg">Budget {statsBundle.budget.status}</h3>
+                            <p className="text-foreground-secondary leading-relaxed">
+                              {statsBundle.budget.status === 'Over Budget' 
+                                ? `Projected to exceed budget by Rs ${statsBundle.budget.projected_overrun_pkr.toLocaleString()}`
+                                : `Approaching budget limit - projected Rs ${statsBundle.forecast.cost_pkr.toLocaleString()}`
+                              }
+                            </p>
                             <p className="text-foreground-muted text-sm">Budget Analysis</p>
                           </div>
                         </div>
-                      ))}
-
-                      {alerts.map((alert, index) => (
-                        <div key={index} className={`flex items-start space-x-4 p-6 rounded-2xl bg-background-card/50 backdrop-blur-sm ${getAlertBorder(alert.priority)} animate-fade-in`} style={{ animationDelay: `${index * 0.1}s` }}>
-                          <div className="flex-shrink-0 mt-1">
-                            {getAlertIcon(alert.type)}
-                          </div>
-                          <div className="flex-1 space-y-2">
-                            <h3 className="font-semibold text-foreground text-lg">{alert.title}</h3>
-                            <p className="text-foreground-secondary leading-relaxed">{alert.message}</p>
-                            <p className="text-foreground-muted text-sm">{alert.time}</p>
-                          </div>
-                        </div>
-                      ))}
-                      
-                      {/* Cost Insights Mini Cards */}
-                      {costInsights.map((insight, index) => (
-                        <div key={`cost-${index}`} className={`flex items-start space-x-4 p-6 rounded-2xl bg-background-card/50 backdrop-blur-sm border-l-4 ${
-                          insight.type === 'warning' ? 'border-l-accent-amber' :
-                          insight.type === 'success' ? 'border-l-primary' :
-                          'border-l-accent-blue'
-                        } animate-fade-in`} style={{ animationDelay: `${(alerts.length + index) * 0.1}s` }}>
-                          <div className="flex-shrink-0 mt-1">
-                            {insight.type === 'warning' ? <AlertTriangle className="h-5 w-5 text-accent-amber" /> :
-                             insight.type === 'success' ? <CheckCircle className="h-5 w-5 text-primary" /> :
-                             <Info className="h-5 w-5 text-accent-blue" />}
-                          </div>
-                          <div className="flex-1 space-y-2">
-                            <h3 className="font-semibold text-foreground text-lg">{insight.title}</h3>
-                            <p className="text-foreground-secondary leading-relaxed">{insight.message}</p>
-                            {insight.impact && (
-                              <p className="text-primary text-sm font-medium">{insight.impact}</p>
-                            )}
-                            <p className="text-foreground-muted text-sm">Cost Analysis</p>
-                          </div>
-                        </div>
-                      ))}
+                      )}
                     </div>
-                  </div>
-
-                  {/* Anomaly Alerts */}
-                  {anomalies.length > 0 && (
-                    <div className="space-y-3">
-                      <h4 className="font-medium text-foreground">System Alerts</h4>
-                      {anomalies.map((anomaly, index) => (
-                        <AnomalyAlert
-                          key={anomaly.id}
-                          anomaly={anomaly}
-                          compact={true}
-                          className="animate-fade-in"
-                          style={{ animationDelay: `${index * 0.1}s` }}
-                        />
-                      ))}
-                    </div>
-                  )}
                 </Card>
               </div>
 
@@ -572,11 +478,42 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
             </div>
 
             {/* Budget Monitor Card */}
-            {monthlyBudget && (
-              <BudgetMonitorCard
-                budget={monthlyBudget}
-                onBudgetChange={handleBudgetSet}
-              />
+            {statsBundle?.budget.monthly_pkr && (
+              <Card className="card-premium">
+                <div className="space-y-6">
+                  <div className="flex items-center space-x-3">
+                    <div className="bg-gradient-to-r from-primary to-accent-cyan p-2 rounded-xl">
+                      <Target className="h-6 w-6 text-white" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-semibold text-foreground font-sora">Budget Monitor</h2>
+                      <p className="text-foreground-secondary">Real-time tracking vs target</p>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div className="flex justify-between items-center">
+                      <span className="text-foreground-secondary">Monthly Progress</span>
+                      <span className="font-medium text-foreground">
+                        {statsBundle.budget.mtd_vs_budget.pct_used.toFixed(1)}% used
+                      </span>
+                    </div>
+                    
+                    <div className="relative">
+                      <div className="w-full bg-background-secondary rounded-full h-3">
+                        <div 
+                          className={`h-3 rounded-full transition-all duration-500 ${
+                            statsBundle.budget.status === 'Over Budget' ? 'bg-gradient-to-r from-red-500 to-red-600' :
+                            statsBundle.budget.status === 'At Risk' ? 'bg-gradient-to-r from-accent-amber to-red-500' :
+                            'bg-gradient-to-r from-primary to-accent-cyan'
+                          }`}
+                          style={{ width: `${Math.min(statsBundle.budget.mtd_vs_budget.pct_used, 100)}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </Card>
             )}
 
             {/* Recent Readings */}
@@ -606,10 +543,10 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
                       </tr>
                     </thead>
                     <tbody>
-                      {(dashboardStats?.recentReadings || recentReadings).map((reading: any, index: number) => (
+                      {recentReadings.map((reading: any, index: number) => (
                         <tr key={index} className="border-t border-border/30 hover:bg-background-card/30 transition-colors">
                           <td className="py-4 px-6 text-foreground font-mono">{reading.date}</td>
-                          <td className="py-4 px-6 text-foreground">{reading.meter}</td>
+                          <td className="py-4 px-6 text-foreground">{reading.meter?.label || 'Unknown'}</td>
                           <td className="py-4 px-6 text-foreground">
                             <span className="px-2 py-1 rounded-full text-xs bg-background-card text-foreground-secondary">
                               Week {reading.week || 1}
@@ -617,7 +554,7 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
                           </td>
                           <td className="py-4 px-6 text-foreground font-mono">{reading.reading?.toLocaleString() || '0'}</td>
                           <td className="py-4 px-6 text-foreground font-mono">{reading.usage} kWh</td>
-                          <td className="py-4 px-6 text-primary font-mono font-semibold">Rs {(reading.cost || reading.estimatedCost || 0).toLocaleString()}</td>
+                          <td className="py-4 px-6 text-primary font-mono font-semibold">Rs {(reading.estimatedCost || 0).toLocaleString()}</td>
                           <td className="py-4 px-6">
                             {reading.isOfficialEndOfMonth ? (
                               <span className="px-2 py-1 rounded-full text-xs bg-primary/10 text-primary font-medium">
@@ -653,16 +590,16 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
 
 // Forecast Card Component
 const ForecastCard: React.FC = () => {
-  const [forecastData, setForecastData] = useState<any>(null)
+  const [statsBundle, setStatsBundle] = useState<StatsBundle | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const fetchForecast = async () => {
       try {
-        const response = await fetch('/api/forecast/bill')
+        const response = await fetch('/api/stats/overview')
         if (response.ok) {
           const data = await response.json()
-          setForecastData(data.data)
+          setStatsBundle(data.data)
         }
       } catch (error) {
         console.error('Failed to fetch forecast:', error)
@@ -685,7 +622,7 @@ const ForecastCard: React.FC = () => {
     )
   }
 
-  if (!forecastData) return null
+  if (!statsBundle) return null
 
   return (
     <Card className="card-premium">
@@ -703,21 +640,21 @@ const ForecastCard: React.FC = () => {
         <div className="grid grid-cols-2 gap-4">
           <div className="text-center p-4 rounded-2xl bg-gradient-to-br from-primary/10 to-accent-cyan/10 border border-primary/20">
             <p className="text-sm text-foreground-secondary mb-2">Expected Usage</p>
-            <p className="text-3xl font-bold text-foreground font-mono">{forecastData.forecast.usage.expected}</p>
+            <p className="text-3xl font-bold text-foreground font-mono">{statsBundle.forecast.usage_kwh}</p>
             <p className="text-xs text-foreground-tertiary">kWh this month</p>
           </div>
           <div className="text-center p-4 rounded-2xl bg-gradient-to-br from-accent-amber/10 to-accent-pink/10 border border-accent-amber/20">
             <p className="text-sm text-foreground-secondary mb-2">Expected Bill</p>
-            <p className="text-3xl font-bold text-primary font-mono">Rs {forecastData.forecast.bill.expected.toLocaleString()}</p>
+            <p className="text-3xl font-bold text-primary font-mono">Rs {statsBundle.forecast.cost_pkr.toLocaleString()}</p>
             <p className="text-xs text-foreground-tertiary">projected total</p>
           </div>
         </div>
 
-        {forecastData.comparison.vsLastMonth && (
+        {statsBundle.forecast.vs_prev_full.pct_cost !== 0 && (
           <div className="text-center p-3 rounded-xl bg-background-card/30">
             <p className="text-sm text-foreground-secondary">vs Last Month: 
-              <span className={`ml-2 font-semibold ${forecastData.comparison.vsLastMonth > 0 ? 'text-accent-amber' : 'text-primary'}`}>
-                {forecastData.comparison.vsLastMonth > 0 ? '+' : ''}{forecastData.comparison.vsLastMonth}%
+              <span className={`ml-2 font-semibold ${statsBundle.forecast.vs_prev_full.pct_cost > 0 ? 'text-accent-amber' : 'text-primary'}`}>
+                {statsBundle.forecast.vs_prev_full.pct_cost > 0 ? '+' : ''}{statsBundle.forecast.vs_prev_full.pct_cost}%
               </span>
             </p>
           </div>

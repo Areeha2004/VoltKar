@@ -24,6 +24,7 @@ import Navbar from '../../components/layout/Navbar'
 import Sidebar from '../../components/layout/Sidebar'
 import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
+import { StatsBundle } from '@/lib/statsService'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from 'recharts'
 
 const AnalyticsPage: React.FC = () => {
@@ -34,10 +35,8 @@ const AnalyticsPage: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false)
 
   // Data states
-  const [usageData, setUsageData] = useState<any>(null)
-  const [costData, setCostData] = useState<any>(null)
-  const [forecastData, setForecastData] = useState<any>(null)
-  const [comparisonData, setComparisonData] = useState<any>(null)
+  const [statsBundle, setStatsBundle] = useState<StatsBundle | null>(null)
+  const [timeSeries, setTimeSeries] = useState<any>(null)
   const [anomalies, setAnomalies] = useState<any[]>([])
   const [insights, setInsights] = useState<any[]>([])
   const [meters, setMeters] = useState<any[]>([])
@@ -47,34 +46,17 @@ const AnalyticsPage: React.FC = () => {
     try {
       setLoading(true)
       
-      const [usageRes, costRes, forecastRes, comparisonRes, metersRes] = await Promise.all([
-        fetch('/api/analytics/usage'),
-        fetch('/api/analytics/costs'),
-        fetch('/api/forecast/bill'),
-        fetch('/api/analytics/comparisons?type=all'),
+      // Fetch unified analytics data
+      const analyticsResponse = await fetch('/api/stats/analytics')
+      if (analyticsResponse.ok) {
+        const analyticsData = await analyticsResponse.json()
+        setStatsBundle(analyticsData.data.stats)
+        setTimeSeries(analyticsData.data.timeSeries)
+      }
+
+      const [metersRes] = await Promise.all([
         fetch('/api/meters')
       ])
-
-      if (usageRes.ok) {
-        const usage = await usageRes.json()
-        setUsageData(usage.data)
-      }
-
-      if (costRes.ok) {
-        const cost = await costRes.json()
-        setCostData(cost.data)
-        setInsights(cost.data.insights || [])
-      }
-
-      if (forecastRes.ok) {
-        const forecast = await forecastRes.json()
-        setForecastData(forecast.data)
-      }
-
-      if (comparisonRes.ok) {
-        const comparison = await comparisonRes.json()
-        setComparisonData(comparison.data)
-      }
 
       if (metersRes.ok) {
         const metersData = await metersRes.json()
@@ -123,24 +105,24 @@ const AnalyticsPage: React.FC = () => {
   }, [timeRange, selectedMeter])
 
   // Chart data preparation
-  const weeklyChartData = usageData?.weeklyBreakdown?.map((week: any) => ({
+  const weeklyChartData = timeSeries?.weeklyBreakdown?.map((week: any) => ({
     week: `Week ${week.week}`,
     usage: week.usage,
     cost: week.cost,
     target: 60 // Example target
   })) || []
 
-  const forecastChartData = forecastData ? [
-    { scenario: 'Low', usage: forecastData.forecast.usage.low, cost: forecastData.forecast.bill.low },
-    { scenario: 'Expected', usage: forecastData.forecast.usage.expected, cost: forecastData.forecast.bill.expected },
-    { scenario: 'High', usage: forecastData.forecast.usage.high, cost: forecastData.forecast.bill.high }
+  const forecastChartData = statsBundle ? [
+    { scenario: 'Low', usage: Math.round(statsBundle.forecast.usage_kwh * 0.9), cost: Math.round(statsBundle.forecast.cost_pkr * 0.9) },
+    { scenario: 'Expected', usage: statsBundle.forecast.usage_kwh, cost: statsBundle.forecast.cost_pkr },
+    { scenario: 'High', usage: Math.round(statsBundle.forecast.usage_kwh * 1.1), cost: Math.round(statsBundle.forecast.cost_pkr * 1.1) }
   ] : []
 
-  const slabDistributionData = costData?.breakdown ? [
+  const slabDistributionData = statsBundle ? [
     { name: '0-50 kWh', value: 50, cost: 197.5, color: '#00d4aa' },
     { name: '51-100 kWh', value: 50, cost: 387, color: '#3b82f6' },
     { name: '101-200 kWh', value: 100, cost: 1006, color: '#8b5cf6' },
-    { name: '201+ kWh', value: Math.max(0, (usageData?.monthToDateUsage || 0) - 200), cost: 0, color: '#f59e0b' }
+    { name: '201+ kWh', value: Math.max(0, (statsBundle.mtd.usage_kwh || 0) - 200), cost: 0, color: '#f59e0b' }
   ].filter(item => item.value > 0) : []
 
   const getAnomalySeverityColor = (severity: string) => {
@@ -237,33 +219,33 @@ const AnalyticsPage: React.FC = () => {
               {[
                 {
                   title: 'MTD Usage',
-                  value: usageData?.monthToDateUsage || 0,
+                  value: statsBundle?.mtd.usage_kwh || 0,
                   unit: 'kWh',
-                  change: comparisonData?.comparisons?.[0]?.percentageChange?.usage || 0,
+                  change: statsBundle?.mtd.vs_prev_same_period.pct_kwh || 0,
                   icon: Zap,
                   gradient: 'from-primary to-accent-cyan'
                 },
                 {
                   title: 'MTD Cost',
-                  value: Math.round(usageData?.monthToDateCost || 0),
+                  value: Math.round(statsBundle?.mtd.cost_pkr || 0),
                   unit: 'PKR',
-                  change: comparisonData?.comparisons?.[0]?.percentageChange?.cost || 0,
+                  change: statsBundle?.mtd.vs_prev_same_period.pct_cost || 0,
                   icon: DollarSign,
                   gradient: 'from-accent-blue to-accent-purple'
                 },
                 {
                   title: 'Forecast Bill',
-                  value: Math.round(forecastData?.forecast?.bill?.expected || 0),
+                  value: Math.round(statsBundle?.forecast.cost_pkr || 0),
                   unit: 'PKR',
-                  change: forecastData?.comparison?.vsLastMonth || 0,
+                  change: statsBundle?.forecast.vs_prev_full.pct_cost || 0,
                   icon: TrendingUp,
                   gradient: 'from-accent-amber to-accent-pink'
                 },
                 {
                   title: 'Efficiency Score',
-                  value: 87,
+                  value: statsBundle?.mtd.efficiency_score || 0,
                   unit: '%',
-                  change: 12,
+                  change: statsBundle?.mtd.vs_prev_same_period.pct_efficiency || 0,
                   icon: Target,
                   gradient: 'from-accent-emerald to-primary'
                 }
@@ -337,7 +319,7 @@ const AnalyticsPage: React.FC = () => {
                         </div>
                         <div>
                           <h2 className="text-2xl font-semibold text-foreground font-sora">Weekly Usage Trend</h2>
-                          <p className="text-foreground-secondary">Current month breakdown</p>
+                          <p className="text-foreground-secondary">{statsBundle?.timeframeLabels.mtd} breakdown</p>
                         </div>
                       </div>
                       <div className="flex items-center space-x-2 text-sm text-foreground-secondary">
@@ -397,7 +379,7 @@ const AnalyticsPage: React.FC = () => {
                         </div>
                         <div>
                           <h3 className="text-xl font-semibold text-foreground font-sora">Slab Distribution</h3>
-                          <p className="text-foreground-secondary">Current month usage by tariff slab</p>
+                          <p className="text-foreground-secondary">{statsBundle?.timeframeLabels.mtd} usage by tariff slab</p>
                         </div>
                       </div>
                       
@@ -461,7 +443,7 @@ const AnalyticsPage: React.FC = () => {
                       
                       <div className="space-y-6">
                         {[
-                          { label: 'Overall Efficiency', value: 87, target: 85, color: 'primary' },
+                          { label: 'Overall Efficiency', value: statsBundle?.mtd.efficiency_score || 0, target: 85, color: 'primary' },
                           { label: 'Cost Efficiency', value: 92, target: 90, color: 'accent-blue' },
                           { label: 'Peak Avoidance', value: 78, target: 80, color: 'accent-amber' },
                           { label: 'Slab Optimization', value: 95, target: 85, color: 'accent-emerald' }
@@ -520,7 +502,7 @@ const AnalyticsPage: React.FC = () => {
                       </div>
                       <div>
                         <h2 className="text-2xl font-semibold text-foreground font-sora">Monthly Forecast Scenarios</h2>
-                        <p className="text-foreground-secondary">Projected usage and costs based on current patterns</p>
+                        <p className="text-foreground-secondary">Projected usage and costs based on {statsBundle?.forecast.method.replace('_', ' ')} method</p>
                       </div>
                     </div>
                     
@@ -575,10 +557,10 @@ const AnalyticsPage: React.FC = () => {
                           <div className="flex justify-between">
                             <span className="text-foreground-secondary">vs Last Month:</span>
                             <span className={`font-medium ${
-                              (forecastData?.comparison?.vsLastMonth || 0) > 0 ? 'text-red-400' : 'text-primary'
+                              (statsBundle?.forecast.vs_prev_full.pct_cost || 0) > 0 ? 'text-red-400' : 'text-primary'
                             }`}>
-                              {(forecastData?.comparison?.vsLastMonth || 0) > 0 ? '+' : ''}
-                              {forecastData?.comparison?.vsLastMonth || 0}%
+                              {(statsBundle?.forecast.vs_prev_full.pct_cost || 0) > 0 ? '+' : ''}
+                              {statsBundle?.forecast.vs_prev_full.pct_cost || 0}%
                             </span>
                           </div>
                         </div>
@@ -610,26 +592,30 @@ const AnalyticsPage: React.FC = () => {
                           <div className="space-y-4">
                             <div className="flex items-center justify-between">
                               <h3 className="font-semibold text-foreground">Monthly Budget Status</h3>
-                              <span className="px-3 py-1 rounded-full text-xs font-medium bg-primary/10 text-primary">
-                                On Track
+                              <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+                                statsBundle?.budget.status === 'On Track' ? 'bg-primary/10 text-primary' :
+                                statsBundle?.budget.status === 'At Risk' ? 'bg-accent-amber/10 text-accent-amber' :
+                                'bg-red-500/10 text-red-400'
+                              }`}>
+                                {statsBundle?.budget.status || 'No Budget Set'}
                               </span>
                             </div>
                             <div className="space-y-3">
                               <div className="flex justify-between">
                                 <span className="text-foreground-secondary">Budget:</span>
-                                <span className="font-bold text-foreground">Rs 25,000</span>
+                                <span className="font-bold text-foreground">Rs {(statsBundle?.budget.monthly_pkr || 0).toLocaleString()}</span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-foreground-secondary">Spent:</span>
-                                <span className="font-bold text-foreground">Rs {Math.round(usageData?.monthToDateCost || 0).toLocaleString()}</span>
+                                <span className="font-bold text-foreground">Rs {Math.round(statsBundle?.mtd.cost_pkr || 0).toLocaleString()}</span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-foreground-secondary">Remaining:</span>
-                                <span className="font-bold text-primary">Rs {(25000 - Math.round(usageData?.monthToDateCost || 0)).toLocaleString()}</span>
+                                <span className="font-bold text-primary">Rs {(statsBundle?.budget.remaining_to_budget_pkr || 0).toLocaleString()}</span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-foreground-secondary">Projected:</span>
-                                <span className="font-bold text-foreground">Rs {Math.round(forecastData?.forecast?.bill?.expected || 0).toLocaleString()}</span>
+                                <span className="font-bold text-foreground">Rs {Math.round(statsBundle?.forecast.cost_pkr || 0).toLocaleString()}</span>
                               </div>
                             </div>
                           </div>
@@ -659,11 +645,11 @@ const AnalyticsPage: React.FC = () => {
                             <div className="space-y-3">
                               <div className="flex justify-between">
                                 <span className="text-foreground-secondary">Daily Target:</span>
-                                <span className="font-bold text-foreground">Rs 833</span>
+                                <span className="font-bold text-foreground">Rs {Math.round((statsBundle?.budget.monthly_pkr || 0) / (statsBundle?.window.daysInMonth || 30))}</span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-foreground-secondary">Daily Average:</span>
-                                <span className="font-bold text-primary">Rs {Math.round((usageData?.monthToDateCost || 0) / 20)}</span>
+                                <span className="font-bold text-primary">Rs {Math.round((statsBundle?.mtd.cost_pkr || 0) / (statsBundle?.window.daysElapsed || 1))}</span>
                               </div>
                               <div className="flex justify-between">
                                 <span className="text-foreground-secondary">Today's Usage:</span>
@@ -874,7 +860,7 @@ const AnalyticsPage: React.FC = () => {
             )}
 
             {/* Comparison Analysis */}
-            {comparisonData && (
+            {statsBundle && (
               <Card className="card-premium">
                 <div className="space-y-6">
                   <div className="flex items-center space-x-3">
@@ -888,21 +874,46 @@ const AnalyticsPage: React.FC = () => {
                   </div>
                   
                   <div className="grid md:grid-cols-3 gap-6">
-                    {Array.isArray(comparisonData.comparisons) ? 
-                      comparisonData.comparisons.map((comparison: any, index: number) => (
-                        <div key={index} className="p-6 rounded-2xl bg-background-card/30 border border-border/30">
-                          <div className="space-y-4">
-                            <div className="flex items-center justify-between">
-                              <h3 className="font-semibold text-foreground">{comparison.comparisonType}</h3>
-                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                comparison.trend === 'increasing' ? 'bg-red-500/10 text-red-400' :
-                                comparison.trend === 'decreasing' ? 'bg-primary/10 text-primary' :
-                                'bg-accent-blue/10 text-accent-blue'
-                              }`}>
-                                {comparison.trend}
-                              </span>
-                            </div>
-                            <div className="space-y-2">
+                    {[
+                      {
+                        comparisonType: 'MTD vs Last Month (same period)',
+                        trend: statsBundle.mtd.vs_prev_same_period.pct_kwh > 0 ? 'increasing' : 'decreasing',
+                        percentageChange: {
+                          usage: statsBundle.mtd.vs_prev_same_period.pct_kwh,
+                          cost: statsBundle.mtd.vs_prev_same_period.pct_cost
+                        }
+                      },
+                      {
+                        comparisonType: 'Forecast vs Last Month (full)',
+                        trend: statsBundle.forecast.vs_prev_full.pct_kwh > 0 ? 'increasing' : 'decreasing',
+                        percentageChange: {
+                          usage: statsBundle.forecast.vs_prev_full.pct_kwh,
+                          cost: statsBundle.forecast.vs_prev_full.pct_cost
+                        }
+                      },
+                      {
+                        comparisonType: 'Efficiency Trend',
+                        trend: statsBundle.mtd.vs_prev_same_period.pct_efficiency > 0 ? 'increasing' : 'decreasing',
+                        percentageChange: {
+                          usage: 0,
+                          cost: statsBundle.mtd.vs_prev_same_period.pct_efficiency
+                        }
+                      }
+                    ].map((comparison: any, index: number) => (
+                      <div key={index} className="p-6 rounded-2xl bg-background-card/30 border border-border/30">
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between">
+                            <h3 className="font-semibold text-foreground">{comparison.comparisonType}</h3>
+                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                              comparison.trend === 'increasing' ? 'bg-red-500/10 text-red-400' :
+                              comparison.trend === 'decreasing' ? 'bg-primary/10 text-primary' :
+                              'bg-accent-blue/10 text-accent-blue'
+                            }`}>
+                              {comparison.trend}
+                            </span>
+                          </div>
+                          <div className="space-y-2">
+                            {comparison.percentageChange.usage !== 0 && (
                               <div className="flex justify-between">
                                 <span className="text-foreground-secondary">Usage Change:</span>
                                 <span className={`font-bold ${
@@ -911,52 +922,19 @@ const AnalyticsPage: React.FC = () => {
                                   {comparison.percentageChange.usage > 0 ? '+' : ''}{comparison.percentageChange.usage}%
                                 </span>
                               </div>
-                              <div className="flex justify-between">
-                                <span className="text-foreground-secondary">Cost Change:</span>
-                                <span className={`font-bold ${
-                                  comparison.percentageChange.cost > 0 ? 'text-red-400' : 'text-primary'
-                                }`}>
-                                  {comparison.percentageChange.cost > 0 ? '+' : ''}{comparison.percentageChange.cost}%
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )) :
-                      // Single comparison object
-                      <div className="p-6 rounded-2xl bg-background-card/30 border border-border/30">
-                        <div className="space-y-4">
-                          <div className="flex items-center justify-between">
-                            <h3 className="font-semibold text-foreground">{comparisonData.comparisons.comparisonType}</h3>
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              comparisonData.comparisons.trend === 'increasing' ? 'bg-red-500/10 text-red-400' :
-                              comparisonData.comparisons.trend === 'decreasing' ? 'bg-primary/10 text-primary' :
-                              'bg-accent-blue/10 text-accent-blue'
-                            }`}>
-                              {comparisonData.comparisons.trend}
-                            </span>
-                          </div>
-                          <div className="space-y-2">
-                            <div className="flex justify-between">
-                              <span className="text-foreground-secondary">Usage Change:</span>
-                              <span className={`font-bold ${
-                                comparisonData.comparisons.percentageChange.usage > 0 ? 'text-red-400' : 'text-primary'
-                              }`}>
-                                {comparisonData.comparisons.percentageChange.usage > 0 ? '+' : ''}{comparisonData.comparisons.percentageChange.usage}%
-                              </span>
-                            </div>
+                            )}
                             <div className="flex justify-between">
                               <span className="text-foreground-secondary">Cost Change:</span>
                               <span className={`font-bold ${
-                                comparisonData.comparisons.percentageChange.cost > 0 ? 'text-red-400' : 'text-primary'
+                                comparison.percentageChange.cost > 0 ? 'text-red-400' : 'text-primary'
                               }`}>
-                                {comparisonData.comparisons.percentageChange.cost > 0 ? '+' : ''}{comparisonData.comparisons.percentageChange.cost}%
+                                {comparison.percentageChange.cost > 0 ? '+' : ''}{comparison.percentageChange.cost}%
                               </span>
                             </div>
                           </div>
                         </div>
                       </div>
-                    }
+                    ))}
                   </div>
                 </div>
               </Card>

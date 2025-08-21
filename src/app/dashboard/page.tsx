@@ -1,7 +1,8 @@
-"use client";
-import React, { useState, useEffect } from "react";
-import { useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+'use client'
+import React, { useState, useEffect } from 'react'
+import { useSession } from 'next-auth/react'
+import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 
 import {
   Zap,
@@ -19,62 +20,63 @@ import {
   Lightbulb,
   Wallet,
   Clock
-} from "lucide-react";
+} from 'lucide-react'
 
-import Navbar from "../../components/layout/Navbar";
-import Sidebar from "../../components/layout/Sidebar";
-import Card from "../../components/ui/Card";
-import Button from "../../components/ui/Button";
-import SetBudgetModal from "../../components/budget/SetBudgetModal";
-import { StatsBundle } from "@/lib/statsService";
+import Navbar from '../../components/layout/Navbar'
+import Sidebar from '../../components/layout/Sidebar'
+import Card from '../../components/ui/Card'
+import Button from '../../components/ui/Button'
+import SetBudgetModal from '../../components/budget/SetBudgetModal'
+import { StatsBundle } from '@/lib/statsService'
 
 const Dashboard: React.FC = () => {
-  const { data: session, status } = useSession();
+  const { data: session, status } = useSession()
+  const router = useRouter()
   const name =
     session?.user?.name ??
-    session?.user?.email?.split("@")[0] ??
-    "User";
+    session?.user?.email?.split('@')[0] ??
+    'User'
 
-  const image = session?.user?.image;
-  const initials = name.split(" ").map((p) => p[0]).join("").slice(0, 2);
+  const image = session?.user?.image
+  const initials = name.split(' ').map((p) => p[0]).join('').slice(0, 2)
 
-  const [statsBundle, setStatsBundle] = useState<StatsBundle | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [showBudgetModal, setShowBudgetModal] = useState(false);
-  const [recentReadings, setRecentReadings] = useState<any[]>([]);
+  const [statsBundle, setStatsBundle] = useState<StatsBundle | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [showBudgetModal, setShowBudgetModal] = useState(false)
+  const [recentReadings, setRecentReadings] = useState<any[]>([])
 
   // Fetch unified stats bundle
   useEffect(() => {
     const fetchStats = async () => {
       try {
-        const response = await fetch("/api/stats/overview");
+        const response = await fetch('/api/stats/overview')
         if (response.ok) {
-          const data = await response.json();
-          setStatsBundle(data.data);
+          const data = await response.json()
+          setStatsBundle(data.data)
         }
 
         // Fetch recent readings for display
-        const readingsResponse = await fetch("/api/readings?limit=5");
+        const readingsResponse = await fetch('/api/readings?limit=5')
         if (readingsResponse.ok) {
-          const readingsData = await readingsResponse.json();
-          setRecentReadings(readingsData.readings || []);
+          const readingsData = await readingsResponse.json()
+          setRecentReadings(readingsData.readings || [])
         }
       } catch (error) {
-        console.error("Failed to fetch dashboard data:", error);
+        console.error('Failed to fetch dashboard data:', error)
       } finally {
-        setLoading(false);
+        setLoading(false)
       }
-    };
+    }
 
     if (session?.user?.id) {
-      fetchStats();
+      fetchStats()
     }
-  }, [session?.user?.id]);
+  }, [session?.user?.id])
 
   const handleBudgetSet = (budget: number) => {
     // Refresh dashboard stats to recalculate with new budget
-    window.location.reload();
-  };
+    window.location.reload()
+  }
 
   const getMetrics = () => {
     if (!statsBundle) {
@@ -149,40 +151,12 @@ const Dashboard: React.FC = () => {
     )
   }
 
-  const recentReadings = [
-    { date: '2024-01-15', meter: 'Main House', reading: 15420, usage: 180, cost: 3200 },
-    { date: '2024-01-10', meter: 'Main House', reading: 15240, usage: 165, cost: 2950 },
-    { date: '2024-01-05', meter: 'Guest House', reading: 8750, usage: 95, cost: 1700 },
-  ]
-
   const quickActions = [
     { icon: Plus, label: 'Enter Reading', href: '/readings', color: 'from-primary to-accent-cyan' },
     { icon: TrendingUp, label: 'View Analytics', href: '/analytics', color: 'from-accent-blue to-accent-purple' },
     { icon: Settings, label: 'Manage Devices', href: '/devices', color: 'from-accent-amber to-accent-pink' },
     { icon: Target, label: 'Start Challenge', href: '/challenges', color: 'from-accent-emerald to-primary' }
   ]
-
-  const getAlertIcon = (type: string) => {
-    switch (type) {
-      case 'warning':
-        return <AlertTriangle className="h-5 w-5 text-accent-amber" />
-      case 'success':
-        return <CheckCircle className="h-5 w-5 text-primary" />
-      case 'info':
-        return <Info className="h-5 w-5 text-accent-blue" />
-      default:
-        return <Info className="h-5 w-5" />
-    }
-  }
-
-  const getAlertBorder = (priority: string) => {
-    switch (priority) {
-      case 'high': return 'border-l-4 border-l-accent-amber'
-      case 'medium': return 'border-l-4 border-l-primary'
-      case 'low': return 'border-l-4 border-l-accent-blue'
-      default: return ''
-    }
-  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -205,7 +179,7 @@ const Dashboard: React.FC = () => {
                 <p className="text-xl text-foreground-secondary">Here's your electricity overview for today</p>
               </div>
               <div className="flex items-center space-x-4">
-                {!monthlyBudget && (
+                {!statsBundle?.budget.monthly_pkr && (
                   <Button 
                     variant="outline" 
                     onClick={() => setShowBudgetModal(true)}
@@ -215,11 +189,18 @@ const Dashboard: React.FC = () => {
                     Set Budget
                   </Button>
                 )}
-                <Button  className="premium-button h-13">
+                <Button 
+                  className="premium-button h-13"
+                  onClick={() => router.push('/readings')}
+                >
                   <Plus className="h-4 w-5 mr-2" />
                   Enter Reading
                 </Button>
-                <Button variant="outline" size="md">
+                <Button 
+                  variant="outline" 
+                  size="md"
+                  onClick={() => router.push('/optimization')}
+                >
                   <Settings className="h-5 w-5 mr-2" />
                   Optimize
                 </Button>
@@ -239,11 +220,14 @@ const Dashboard: React.FC = () => {
                         </div>
                       </div>
                       <div className={`flex items-center space-x-1 text-sm font-medium ${
-                        metric.changeType === 'decrease' ? 'text-primary' : 'text-accent-amber'
+                        metric.changeType === 'decrease' ? 'text-primary' : 
+                        metric.changeType === 'increase' ? 'text-accent-amber' : 'text-foreground-secondary'
                       }`}>
                         {metric.changeType === 'decrease' ? 
                           <ArrowDown className="h-4 w-4" /> : 
+                          metric.changeType === 'increase' ?
                           <ArrowUp className="h-4 w-4" />
+                          : null
                         }
                         <span>{metric.change}</span>
                       </div>
@@ -446,6 +430,7 @@ const Dashboard: React.FC = () => {
                         </div>
                       )}
                     </div>
+                  </div>
                 </Card>
               </div>
 
@@ -461,7 +446,8 @@ const Dashboard: React.FC = () => {
                   
                   <div className="space-y-3">
                     {quickActions.map((action, index) => (
-                      <button
+                      <Link
+                        href={action.href}
                         key={index}
                         className="w-full flex items-center space-x-4 p-4 rounded-2xl bg-background-card/30 hover:bg-background-card/60 border border-border/50 hover:border-border-light transition-all duration-300 group animate-fade-in"
                         style={{ animationDelay: `${index * 0.1}s` }}
@@ -470,7 +456,7 @@ const Dashboard: React.FC = () => {
                           <action.icon className="h-5 w-5 text-white" />
                         </div>
                         <span className="font-medium text-foreground text-lg">{action.label}</span>
-                      </button>
+                      </Link>
                     ))}
                   </div>
                 </div>
@@ -526,7 +512,7 @@ const Dashboard: React.FC = () => {
                     </div>
                     <h2 className="text-2xl font-semibold text-foreground font-sora">Recent Readings</h2>
                   </div>
-                  <Button variant="ghost" size="sm">View All</Button>
+                  <Button variant="ghost" size="sm" onClick={() => router.push('/analytics')}>View All</Button>
                 </div>
                 
                 <div className="overflow-hidden rounded-2xl border border-border/50">
@@ -545,7 +531,9 @@ const Dashboard: React.FC = () => {
                     <tbody>
                       {recentReadings.map((reading: any, index: number) => (
                         <tr key={index} className="border-t border-border/30 hover:bg-background-card/30 transition-colors">
-                          <td className="py-4 px-6 text-foreground font-mono">{reading.date}</td>
+                          <td className="py-4 px-6 text-foreground font-mono">
+                            {new Date(reading.date || reading.createdAt).toLocaleDateString('en-GB', { timeZone: 'Asia/Karachi' })}
+                          </td>
                           <td className="py-4 px-6 text-foreground">{reading.meter?.label || 'Unknown'}</td>
                           <td className="py-4 px-6 text-foreground">
                             <span className="px-2 py-1 rounded-full text-xs bg-background-card text-foreground-secondary">
@@ -553,7 +541,7 @@ const Dashboard: React.FC = () => {
                             </span>
                           </td>
                           <td className="py-4 px-6 text-foreground font-mono">{reading.reading?.toLocaleString() || '0'}</td>
-                          <td className="py-4 px-6 text-foreground font-mono">{reading.usage} kWh</td>
+                          <td className="py-4 px-6 text-foreground font-mono">{(reading.usage || 0).toFixed(1)} kWh</td>
                           <td className="py-4 px-6 text-primary font-mono font-semibold">Rs {(reading.estimatedCost || 0).toLocaleString()}</td>
                           <td className="py-4 px-6">
                             {reading.isOfficialEndOfMonth ? (
@@ -582,7 +570,7 @@ const Dashboard: React.FC = () => {
         isOpen={showBudgetModal}
         onClose={() => setShowBudgetModal(false)}
         onBudgetSet={handleBudgetSet}
-        currentBudget={monthlyBudget || undefined}
+        currentBudget={statsBundle?.budget.monthly_pkr || undefined}
       />
     </div>
   )

@@ -29,30 +29,24 @@ import Navbar from '../../components/layout/Navbar'
 import Sidebar from '../../components/layout/Sidebar'
 import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
-import { getBudgetFromStorage } from '../../lib/budgetManager'
+import { StatsBundle } from '../../lib/statService'
 
 const OptimizationPage: React.FC = () => {
+  const [statsBundle, setStatsBundle] = useState<StatsBundle | null>(null)
   const [optimizationData, setOptimizationData] = useState<any>(null)
-  const [analysisData, setAnalysisData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [selectedAction, setSelectedAction] = useState<string | null>(null)
-  const [budget, setBudget] = useState<number | null>(null)
-
-  // Load budget from localStorage
-  useEffect(() => {
-    const storedBudget = getBudgetFromStorage()
-    setBudget(storedBudget)
-  }, [])
 
   // Fetch analysis data
   const fetchAnalysisData = async () => {
     try {
       setLoading(true)
-      const response = await fetch('/api/optimization/analyze')
+      const response = await fetch('/api/stats/optimization')
       if (response.ok) {
         const data = await response.json()
-        setAnalysisData(data.data)
+        setStatsBundle(data.data.stats)
+        setOptimizationData(data.data.optimization)
       }
     } catch (error) {
       console.error('Failed to fetch analysis data:', error)
@@ -69,7 +63,7 @@ const OptimizationPage: React.FC = () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          budget: budget || 25000,
+          budget: statsBundle?.budget.monthly_pkr || 25000,
           includeAppliances: true
         })
       })
@@ -88,12 +82,6 @@ const OptimizationPage: React.FC = () => {
   useEffect(() => {
     fetchAnalysisData()
   }, [])
-
-  useEffect(() => {
-    if (analysisData && !optimizationData) {
-      generateOptimizations()
-    }
-  }, [analysisData])
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
@@ -183,8 +171,8 @@ const OptimizationPage: React.FC = () => {
             <div className="grid md:grid-cols-4 gap-6">
               {[
                 {
-                  title: 'Current Usage',
-                  value: analysisData?.summary?.totalUsage?.toString() || '0',
+                  title: 'Current Usage (MTD)',
+                  value: statsBundle?.optimization.current_usage_mtd_kwh?.toString() || '0',
                   unit: 'kWh',
                   icon: Zap,
                   gradient: 'from-primary to-accent-cyan',
@@ -192,21 +180,21 @@ const OptimizationPage: React.FC = () => {
                 },
                 {
                   title: 'Projected Cost',
-                  value: `Rs ${(analysisData?.summary?.projectedCost || 0).toLocaleString()}`,
+                  value: `Rs ${(statsBundle?.optimization.projected_cost_pkr || 0).toLocaleString()}`,
                   icon: DollarSign,
                   gradient: 'from-accent-blue to-accent-purple',
                   description: 'End of month'
                 },
                 {
                   title: 'Budget Status',
-                  value: budget ? `${Math.round(((analysisData?.summary?.projectedCost || 0) / budget) * 100)}%` : 'Not Set',
+                  value: statsBundle?.budget.status || 'Not Set',
                   icon: Target,
                   gradient: 'from-accent-amber to-accent-pink',
-                  description: budget ? 'Of monthly budget' : 'Set budget to track'
+                  description: statsBundle?.budget.monthly_pkr ? `Rs ${statsBundle.budget.monthly_pkr.toLocaleString()} target` : 'Set budget to track'
                 },
                 {
                   title: 'Savings Potential',
-                  value: optimizationData?.optimization?.recommendation?.expected_savings || 'Calculating...',
+                  value: `Rs ${(statsBundle?.optimization.potential_savings_pkr || 0).toLocaleString()}`,
                   icon: TrendingUp,
                   gradient: 'from-accent-emerald to-primary',
                   description: 'AI estimated'
@@ -253,13 +241,41 @@ const OptimizationPage: React.FC = () => {
                     </div>
                     <div className="flex items-center space-x-2">
                       <div className="px-3 py-1 rounded-full text-xs font-medium bg-primary/10 text-primary">
-                        {optimizationData.metadata.confidence}% Confidence
+                        {optimizationData.metadata?.confidence || 85}% Confidence
                       </div>
                       <div className="px-3 py-1 rounded-full text-xs font-medium bg-accent-blue/10 text-accent-blue">
                         AI Powered
                       </div>
                     </div>
                   </div>
+
+                  {/* Optimization Opportunities */}
+                  {optimizationData.opportunities && (
+                    <div className="space-y-4">
+                      <h3 className="text-lg font-semibold text-foreground">Optimization Opportunities</h3>
+                      <div className="grid md:grid-cols-3 gap-6">
+                        {optimizationData.opportunities.map((opportunity: any, index: number) => (
+                          <div key={index} className="p-6 rounded-2xl bg-background-card/30 border border-border/30 space-y-4">
+                            <div className="flex items-center justify-between">
+                              <h4 className="font-semibold text-foreground">{opportunity.title}</h4>
+                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                opportunity.priority === 'high' ? 'bg-red-500/10 text-red-500' :
+                                opportunity.priority === 'medium' ? 'bg-accent-amber/10 text-accent-amber' :
+                                'bg-accent-blue/10 text-accent-blue'
+                              }`}>
+                                {opportunity.priority.toUpperCase()}
+                              </span>
+                            </div>
+                            <p className="text-sm text-foreground-secondary leading-relaxed">{opportunity.description}</p>
+                            <div className="flex items-center justify-between">
+                              <span className="font-semibold text-primary">Rs {opportunity.potential_savings.toLocaleString()}</span>
+                              <Button size="sm">Apply</Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="grid lg:grid-cols-2 gap-8">
                     {/* Meter Strategy */}
@@ -270,7 +286,7 @@ const OptimizationPage: React.FC = () => {
                       </div>
                       <div className="p-6 rounded-2xl bg-gradient-to-br from-primary/10 to-accent-cyan/10 border border-primary/20">
                         <p className="text-foreground-secondary leading-relaxed">
-                          {optimizationData.optimization.recommendation.meter_strategy}
+                          {optimizationData.optimization?.recommendation?.meter_strategy || 'Single meter optimization - focus on peak hour management'}
                         </p>
                       </div>
                     </div>
@@ -283,31 +299,33 @@ const OptimizationPage: React.FC = () => {
                       </div>
                       <div className="p-6 rounded-2xl bg-gradient-to-br from-accent-blue/10 to-accent-purple/10 border border-accent-blue/20">
                         <p className="text-foreground-secondary leading-relaxed">
-                          {optimizationData.optimization.recommendation.slab_advice}
+                          {optimizationData.optimization?.recommendation?.slab_advice || 'Stay within current slab to maintain optimal rates'}
                         </p>
                       </div>
                     </div>
                   </div>
 
                   {/* Appliance Tips */}
-                  <div className="space-y-4">
-                    <div className="flex items-center space-x-2">
-                      <Lightbulb className="h-5 w-5 text-accent-amber" />
-                      <h3 className="text-lg font-semibold text-foreground">Smart Appliance Tips</h3>
-                    </div>
-                    <div className="grid md:grid-cols-2 gap-4">
-                      {optimizationData.optimization.recommendation.appliance_tips.map((tip: string, index: number) => (
-                        <div key={index} className="p-5 rounded-2xl bg-background-card/30 border border-border/30 space-y-3">
-                          <div className="flex items-start space-x-3">
-                            <div className="bg-gradient-to-r from-accent-amber to-accent-pink p-2 rounded-lg">
-                              <Lightbulb className="h-4 w-4 text-white" />
+                  {optimizationData.optimization?.recommendation?.appliance_tips && (
+                    <div className="space-y-4">
+                      <div className="flex items-center space-x-2">
+                        <Lightbulb className="h-5 w-5 text-accent-amber" />
+                        <h3 className="text-lg font-semibold text-foreground">Smart Appliance Tips</h3>
+                      </div>
+                      <div className="grid md:grid-cols-2 gap-4">
+                        {optimizationData.optimization.recommendation.appliance_tips.map((tip: string, index: number) => (
+                          <div key={index} className="p-5 rounded-2xl bg-background-card/30 border border-border/30 space-y-3">
+                            <div className="flex items-start space-x-3">
+                              <div className="bg-gradient-to-r from-accent-amber to-accent-pink p-2 rounded-lg">
+                                <Lightbulb className="h-4 w-4 text-white" />
+                              </div>
+                              <p className="text-foreground-secondary leading-relaxed">{tip}</p>
                             </div>
-                            <p className="text-foreground-secondary leading-relaxed">{tip}</p>
                           </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Expected Savings */}
                   <div className="p-6 rounded-2xl bg-gradient-to-r from-accent-emerald/10 to-primary/10 border border-primary/20">
@@ -323,7 +341,7 @@ const OptimizationPage: React.FC = () => {
                       </div>
                       <div className="text-right">
                         <p className="text-3xl font-bold text-primary">
-                          {optimizationData.optimization.recommendation.expected_savings}
+                          Rs {(optimizationData.potential_savings_pkr || 0).toLocaleString()}
                         </p>
                         <p className="text-sm text-foreground-secondary">Potential monthly savings</p>
                       </div>
@@ -479,7 +497,7 @@ const OptimizationPage: React.FC = () => {
             )}
 
             {/* Meter Performance Analysis */}
-            {analysisData?.meters && (
+            {statsBundle && (
               <Card className="card-premium">
                 <div className="space-y-6">
                   <div className="flex items-center space-x-3">
@@ -487,72 +505,76 @@ const OptimizationPage: React.FC = () => {
                       <Home className="h-7 w-7 text-white" />
                     </div>
                     <div>
-                      <h2 className="text-2xl font-semibold text-foreground font-sora">Meter Performance Analysis</h2>
-                      <p className="text-foreground-secondary">Individual meter optimization insights</p>
+                      <h2 className="text-2xl font-semibold text-foreground font-sora">Current Month Performance</h2>
+                      <p className="text-foreground-secondary">MTD usage and cost analysis</p>
                     </div>
                   </div>
 
                   <div className="grid md:grid-cols-2 gap-6">
-                    {analysisData.meters.map((meter: any, index: number) => (
-                      <div key={meter.meterId} className="p-6 rounded-2xl bg-background-card/30 border border-border/30 space-y-4">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-3">
-                            <div className="bg-gradient-to-r from-accent-blue to-accent-purple p-2 rounded-xl">
-                              <Home className="h-5 w-5 text-white" />
-                            </div>
-                            <div>
-                              <h3 className="text-lg font-semibold text-foreground">{meter.label}</h3>
-                              <p className="text-sm text-foreground-secondary">{meter.type}</p>
-                            </div>
+                    <div className="p-6 rounded-2xl bg-background-card/30 border border-border/30 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                          <div className="bg-gradient-to-r from-accent-blue to-accent-purple p-2 rounded-xl">
+                            <Home className="h-5 w-5 text-white" />
                           </div>
-                          <div className="text-right">
-                            <p className="text-xl font-bold text-foreground">{meter.efficiency}%</p>
-                            <p className="text-xs text-foreground-secondary">Efficiency</p>
+                          <div>
+                            <h3 className="text-lg font-semibold text-foreground">Current Usage</h3>
+                            <p className="text-sm text-foreground-secondary">MTD Performance</p>
                           </div>
                         </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="text-center p-3 rounded-xl bg-background-card/50">
-                            <p className="text-sm text-foreground-secondary">Current Usage</p>
-                            <p className="text-lg font-bold text-foreground">{meter.currentUsage} kWh</p>
-                          </div>
-                          <div className="text-center p-3 rounded-xl bg-background-card/50">
-                            <p className="text-sm text-foreground-secondary">Projected Cost</p>
-                            <p className="text-lg font-bold text-primary">Rs {meter.projectedCost.toLocaleString()}</p>
-                          </div>
+                        <div className="text-right">
+                          <p className="text-xl font-bold text-foreground">{statsBundle.mtd.efficiency_score}%</p>
+                          <p className="text-xs text-foreground-secondary">Efficiency</p>
                         </div>
-
-                        {meter.currentSlab && (
-                          <div className="p-4 rounded-xl bg-gradient-to-r from-background-card/50 to-background-secondary/50 border border-border/50">
-                            <div className="space-y-2">
-                              <div className="flex items-center space-x-2">
-                                <BarChart3 className="h-4 w-4 text-accent-blue" />
-                                <span className="font-medium text-foreground">Current Slab</span>
-                              </div>
-                              <div className="grid grid-cols-2 gap-2 text-sm">
-                                <div className="flex justify-between">
-                                  <span className="text-foreground-secondary">Rate:</span>
-                                  <span className="font-semibold text-foreground">Rs {meter.currentSlab.rate}/kWh</span>
-                                </div>
-                                <div className="flex justify-between">
-                                  <span className="text-foreground-secondary">Range:</span>
-                                  <span className="font-semibold text-foreground">
-                                    {meter.currentSlab.min}-{meter.currentSlab.max === Infinity ? '∞' : meter.currentSlab.max}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        )}
                       </div>
-                    ))}
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="text-center p-3 rounded-xl bg-background-card/50">
+                          <p className="text-sm text-foreground-secondary">Current Usage</p>
+                          <p className="text-lg font-bold text-foreground">{statsBundle.mtd.usage_kwh} kWh</p>
+                        </div>
+                        <div className="text-center p-3 rounded-xl bg-background-card/50">
+                          <p className="text-sm text-foreground-secondary">Current Cost</p>
+                          <p className="text-lg font-bold text-primary">Rs {statsBundle.mtd.cost_pkr.toLocaleString()}</p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-6 rounded-2xl bg-background-card/30 border border-border/30 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-3">
+                          <div className="bg-gradient-to-r from-accent-emerald to-primary p-2 rounded-xl">
+                            <TrendingUp className="h-5 w-5 text-white" />
+                          </div>
+                          <div>
+                            <h3 className="text-lg font-semibold text-foreground">Forecast</h3>
+                            <p className="text-sm text-foreground-secondary">End of Month</p>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xl font-bold text-foreground">{statsBundle.forecast.usage_kwh} kWh</p>
+                          <p className="text-xs text-foreground-secondary">Projected</p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="text-center p-3 rounded-xl bg-background-card/50">
+                          <p className="text-sm text-foreground-secondary">Projected Usage</p>
+                          <p className="text-lg font-bold text-foreground">{statsBundle.forecast.usage_kwh} kWh</p>
+                        </div>
+                        <div className="text-center p-3 rounded-xl bg-background-card/50">
+                          <p className="text-sm text-foreground-secondary">Projected Cost</p>
+                          <p className="text-lg font-bold text-primary">Rs {statsBundle.forecast.cost_pkr.toLocaleString()}</p>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </Card>
             )}
 
             {/* Optimization Opportunities */}
-            {analysisData?.opportunities && analysisData.opportunities.length > 0 && (
+            {optimizationData?.opportunities && optimizationData.opportunities.length > 0 && (
               <Card className="card-premium">
                 <div className="space-y-6">
                   <div className="flex items-center space-x-3">
@@ -566,7 +588,7 @@ const OptimizationPage: React.FC = () => {
                   </div>
 
                   <div className="space-y-4">
-                    {analysisData.opportunities.map((opportunity: any, index: number) => (
+                    {optimizationData.opportunities.map((opportunity: any, index: number) => (
                       <div key={index} className={`p-6 rounded-2xl border-l-4 transition-all duration-300 hover:shadow-card ${getPriorityColor(opportunity.priority)}`}>
                         <div className="space-y-4">
                           <div className="flex items-start justify-between">
@@ -575,6 +597,9 @@ const OptimizationPage: React.FC = () => {
                                 {opportunity.type === 'budget' && <Target className="h-5 w-5 text-white" />}
                                 {opportunity.type === 'slab' && <BarChart3 className="h-5 w-5 text-white" />}
                                 {opportunity.type === 'appliance' && <Lightbulb className="h-5 w-5 text-white" />}
+                                {opportunity.type === 'appliance_optimization' && <Lightbulb className="h-5 w-5 text-white" />}
+                                {opportunity.type === 'usage_timing' && <Clock className="h-5 w-5 text-white" />}
+                                {opportunity.type === 'slab_optimization' && <BarChart3 className="h-5 w-5 text-white" />}
                                 {opportunity.type === 'load_balancing' && <Activity className="h-5 w-5 text-white" />}
                               </div>
                               <div className="space-y-2">
@@ -582,7 +607,7 @@ const OptimizationPage: React.FC = () => {
                                 <p className="text-foreground-secondary leading-relaxed">{opportunity.description}</p>
                                 <div className="flex items-center space-x-2">
                                   <Sparkles className="h-4 w-4 text-primary" />
-                                  <span className="text-sm font-medium text-primary">{opportunity.impact}</span>
+                                  <span className="text-sm font-medium text-primary">Rs {opportunity.potential_savings.toLocaleString()}</span>
                                 </div>
                               </div>
                             </div>
@@ -595,17 +620,10 @@ const OptimizationPage: React.FC = () => {
                             </span>
                           </div>
 
-                          <div className="space-y-2">
-                            <h4 className="font-medium text-foreground">Recommended Actions:</h4>
-                            <div className="grid md:grid-cols-1 gap-2">
-                              {opportunity.actions.map((action: string, actionIndex: number) => (
-                                <div key={actionIndex} className="flex items-center space-x-2 p-3 rounded-lg bg-background-card/50">
-                                  <CheckCircle className="h-4 w-4 text-primary" />
-                                  <span className="text-sm text-foreground-secondary">{action}</span>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
+                          <Button variant="outline" className="w-full">
+                            <CheckCircle className="h-4 w-4 mr-2" />
+                            Apply Optimization
+                          </Button>
                         </div>
                       </div>
                     ))}
@@ -615,7 +633,7 @@ const OptimizationPage: React.FC = () => {
             )}
 
             {/* Appliance Optimization */}
-            {analysisData?.appliances && (
+            {optimizationData?.savingsBreakdown && (
               <Card className="card-premium">
                 <div className="space-y-6">
                   <div className="flex items-center justify-between">
@@ -641,7 +659,7 @@ const OptimizationPage: React.FC = () => {
                           <Lightbulb className="h-6 w-6 text-primary" />
                           <h3 className="font-semibold text-primary text-lg">Total Devices</h3>
                         </div>
-                        <p className="text-3xl font-bold text-foreground">{analysisData.appliances.total}</p>
+                        <p className="text-3xl font-bold text-foreground">{optimizationData.savingsBreakdown.length}</p>
                         <p className="text-sm text-foreground-secondary">Connected appliances</p>
                       </div>
                     </div>
@@ -652,7 +670,7 @@ const OptimizationPage: React.FC = () => {
                           <Activity className="h-6 w-6 text-accent-blue" />
                           <h3 className="font-semibold text-accent-blue text-lg">Total Consumption</h3>
                         </div>
-                        <p className="text-3xl font-bold text-foreground">{Math.round(analysisData.appliances.totalKwh)} kWh</p>
+                        <p className="text-3xl font-bold text-foreground">{Math.round(statsBundle?.optimization.current_usage_mtd_kwh || 0)} kWh</p>
                         <p className="text-sm text-foreground-secondary">Monthly estimate</p>
                       </div>
                     </div>
@@ -663,18 +681,18 @@ const OptimizationPage: React.FC = () => {
                           <DollarSign className="h-6 w-6 text-accent-amber" />
                           <h3 className="font-semibold text-accent-amber text-lg">Appliance Costs</h3>
                         </div>
-                        <p className="text-3xl font-bold text-foreground">Rs {Math.round(analysisData.appliances.totalCost).toLocaleString()}</p>
+                        <p className="text-3xl font-bold text-foreground">Rs {Math.round(optimizationData.savingsBreakdown.reduce((sum: number, app: any) => sum + app.currentCost, 0)).toLocaleString()}</p>
                         <p className="text-sm text-foreground-secondary">Monthly projection</p>
                       </div>
                     </div>
                   </div>
 
                   {/* Top Consumers with AI Tips */}
-                  {analysisData.appliances.topConsumers && analysisData.appliances.topConsumers.length > 0 && (
+                  {optimizationData.savingsBreakdown && optimizationData.savingsBreakdown.length > 0 && (
                     <div className="space-y-4">
                       <h3 className="text-lg font-semibold text-foreground">Top Energy Consumers</h3>
                       <div className="space-y-3">
-                        {analysisData.appliances.topConsumers.map((appliance: any, index: number) => (
+                        {optimizationData.savingsBreakdown.slice(0, 5).map((appliance: any, index: number) => (
                           <div key={appliance.id} className="flex items-center justify-between p-5 rounded-2xl bg-background-card/30 border border-border/30">
                             <div className="flex items-center space-x-4">
                               <div className="text-2xl">
@@ -690,8 +708,8 @@ const OptimizationPage: React.FC = () => {
                             </div>
                             <div className="flex items-center space-x-4">
                               <div className="text-right">
-                                <p className="font-bold text-foreground">{appliance.estimatedKwh} kWh</p>
-                                <p className="text-sm text-foreground-secondary">{appliance.contribution}% of total</p>
+                                <p className="font-bold text-foreground">Rs {appliance.currentCost.toLocaleString()}</p>
+                                <p className="text-sm text-foreground-secondary">Rs {appliance.potentialSavings.toLocaleString()} savings</p>
                               </div>
                               <div className="px-3 py-1 rounded-full text-xs font-medium bg-accent-amber/10 text-accent-amber flex items-center space-x-1">
                                 <Brain className="h-3 w-3" />
@@ -725,13 +743,13 @@ const OptimizationPage: React.FC = () => {
                     {[
                       {
                         title: 'Budget Status',
-                        value: optimizationData.optimization.insights.budget_status === 'on_track' ? 'On Track' : 'Over Budget',
+                        value: statsBundle?.budget.status || 'Not Set',
                         icon: Target,
-                        color: optimizationData.optimization.insights.budget_status === 'on_track' ? 'text-primary' : 'text-red-500'
+                        color: statsBundle?.budget.status === 'On Track' ? 'text-primary' : 'text-red-500'
                       },
                       {
                         title: 'Efficiency Score',
-                        value: `${Math.round(optimizationData.optimization.insights.efficiency_score)}%`,
+                        value: `${Math.round(statsBundle?.mtd.efficiency_score || 0)}%`,
                         icon: Star,
                         color: 'text-accent-blue'
                       },

@@ -1,0 +1,197 @@
+ROLE
+You are a senior full-stack engineer and technical lead onboarding onto an existing project called “Volt” (aka EnergizeWeb). The project was previously developed by another engineer and handed over yesterday. Your task is to deeply analyze the existing codebase, backend APIs, business logic, and frontend integration, then produce a clear post-mortem and execution roadmap.
+
+PROJECT CONTEXT (IMPORTANT)
+Volt is a web platform for Pakistani households to:
+- Enter electricity meter readings (manual, weekly/monthly)
+- Support multiple meters and devices
+- Calculate usage, costs, and month-end bill forecasts using local DISCO tariffs
+- Show analytics and comparisons
+- Provide AI-powered energy saving advice
+- Support advanced features like dual-meter optimization, gamification, and anomaly detection
+
+This is NOT an OCR-based product. Manual input + intelligence is the core.
+
+PRIMARY OBJECTIVES
+1. Determine **what is already implemented**
+2. Identify **what is partially implemented or broken**
+3. Verify whether **analytics and forecasting APIs actually work correctly**
+4. Identify **data flow gaps between frontend and backend**
+5. Produce a **clear, prioritized next-steps plan** so development can continue immediately
+
+DO NOT rewrite everything. Reuse existing logic, APIs, and models where possible. Modify or extend only where needed.
+
+---
+
+## PART 1 — CURRENT STATE ANALYSIS (POST-MORTEM)
+
+### 1. Architecture & Data Flow
+- Identify existing backend APIs and routes
+- Identify frontend pages and which APIs they depend on
+- Map:
+  - Meters → Readings → Usage → Cost → Forecast → Analytics → AI tips
+- Explicitly state:
+  - What data is persisted
+  - What is computed on the fly
+  - What is missing or inconsistent
+
+### 2. Frontend Pages Audit
+Analyze each page and answer:
+- Is the page wired to a real backend API or mock data?
+- Does it render meaningful, correct data?
+- Is the data shape stable and production-ready?
+
+Pages to audit:
+- /dashboard — metrics, alerts, recent readings
+- /readings — meter reading entry
+- /analytics — usage trends, forecasting, AI insights
+- /devices — appliance management
+- /dual-meter — meter load balancing
+- /challenges — gamification
+
+Output a table:
+Page | Status (Working / Partial / Broken) | Blocking Issues | Notes
+
+---
+
+### 3. Backend APIs Audit
+Audit existing APIs against this **intended contract**:
+
+FOUNDATION (Highest Priority)
+- Meters API
+- Readings API
+- Dashboard Stats API
+
+ANALYTICS & FORECASTING
+- Usage analytics
+- Cost analytics
+- Efficiency scoring
+- Period comparisons
+- Forecast bill & usage
+
+ADVANCED FEATURES
+- Appliances
+- Dual-meter optimization
+- Challenges / gamification
+
+For each API:
+- Exists? (Yes / Partial / No)
+- Correct business logic? (Yes / No)
+- Used by frontend? (Yes / No)
+- Safe for production? (Yes / No)
+
+---
+
+### 4. Forecasting & Analytics Verification (CRITICAL)
+This is a key risk area.
+
+Explicitly verify:
+- How forecasts are calculated
+- Whether forecasting logic uses:
+  - MTD usage
+  - Time normalization (days elapsed vs days in month)
+  - Tariff slab non-linearity
+- Whether analytics numbers match:
+  - Dashboard
+  - Analytics page
+  - Optimization page
+
+If logic is missing or flawed:
+- Identify exactly what’s wrong
+- Propose a corrected but minimal implementation
+
+---
+
+## PART 2 — STRATEGIC ALIGNMENT (HOW IT *SHOULD* WORK)
+
+Apply this strategy consistently:
+
+TIMEFRAMES (MANDATORY)
+- Month-to-Date (MTD)
+- Previous Month (Full)
+- Forecast (End of Current Month)
+
+Ensure:
+- No stat mixes timeframes
+- All comparisons are explicit (same period vs full month)
+- Tariff engine is the ONLY source of cost calculation
+
+Define:
+- Single “stats service” or equivalent abstraction
+- One source of truth for:
+  - usage
+  - cost
+  - forecast
+  - budget status
+  - efficiency
+
+---
+
+## PART 3 — GAP ANALYSIS
+
+Produce:
+1. **What’s done well**
+2. **What exists but is unsafe or incorrect**
+3. **What is completely missing**
+4. **What should NOT be built yet**
+
+Clearly identify:
+- Fake / placeholder logic
+- Duplicate calculations
+- UI showing numbers not backed by real data
+
+---
+
+## PART 4 — RECOMMENDED NEXT STEPS (ACTIONABLE PLAN)
+
+Create a **phased execution plan** that I can immediately start coding against.
+
+### Phase 1 — Stabilize Core (MUST DO FIRST)
+- Meter Management API
+- Readings API
+- Dashboard Stats API
+- End-to-end flow: Reading → Dashboard update
+
+### Phase 2 — Fix Analytics & Forecasting
+- Usage analytics
+- Cost analytics
+- Forecast logic
+- Validation against real readings
+
+### Phase 3 — Devices & Optimization
+- Appliance APIs
+- Usage estimation
+- Optimization logic
+
+### Phase 4 — AI Enhancements (Lightweight, Cheap)
+- GPT-based tips
+- Anomaly detection (z-score / rolling average)
+- Alert generation
+
+For each phase:
+- What files/modules to touch
+- What APIs to build or fix
+- What frontend pages become fully functional
+
+---
+
+## PART 5 — RISK & CONFIDENCE REPORT
+
+Finally, answer:
+- Is this project currently production-ready? (Yes / No)
+- What is the biggest technical risk right now?
+- What is the fastest path to a stable MVP?
+- What would a recruiter find impressive vs concerning?
+
+---
+
+## OUTPUT FORMAT (STRICT)
+1. Executive Summary (1 page max)
+2. Current State Audit
+3. Analytics & Forecasting Verdict
+4. Gaps & Risks
+5. Step-by-Step Next Actions (Checklist)
+6. “Start Coding Here Tomorrow” section
+
+Do NOT be vague. Be explicit, technical, and practical.
+Assume the next developer action happens immediately after reading your report.

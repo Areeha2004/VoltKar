@@ -120,7 +120,7 @@ function getCurrentTimeWindow(): TimeWindow {
 /**
  * Aggregate readings into usage profile
  */
-function aggregateReadings(readings: any[]): { totalUsage: number; totalCost: number; profile: any[] } {
+function aggregateReadings(readings: any[], window: TimeWindow): { totalUsage: number; totalCost: number; profile: any[] } {
   if (!readings || readings.length === 0) {
     return { totalUsage: 0, totalCost: 0, profile: [] }
   }
@@ -131,20 +131,31 @@ function aggregateReadings(readings: any[]): { totalUsage: number; totalCost: nu
   // Create daily profile for advanced forecasting
   const dailyProfile = new Map<string, { usage: number; cost: number }>()
   
+  // Initialize all days in month with 0 usage
+  for (let d = 1; d <= window.daysInMonth; d++) {
+    const dateStr = new Date(window.monthStart.getFullYear(), window.monthStart.getMonth(), d).toISOString().split('T')[0]
+    dailyProfile.set(dateStr, { usage: 0, cost: 0 })
+  }
+
   readings.forEach(reading => {
-    const date = new Date(reading.date).toISOString().split('T')[0]
-    const existing = dailyProfile.get(date) || { usage: 0, cost: 0 }
-    dailyProfile.set(date, {
+    const dateStr = new Date(reading.date).toISOString().split('T')[0]
+    const existing = dailyProfile.get(dateStr) || { usage: 0, cost: 0 }
+    dailyProfile.set(dateStr, {
       usage: existing.usage + (reading.usage || 0),
       cost: existing.cost + (reading.estimatedCost || 0)
     })
   })
 
-  const profile = Array.from(dailyProfile.entries()).map(([date, data]) => ({
-    date,
-    usage: data.usage,
-    cost: data.cost
-  }))
+  const profile = Array.from(dailyProfile.entries())
+    .filter(([dateStr]) => {
+        const day = new Date(dateStr).getDate()
+        return day <= window.daysInMonth
+    })
+    .map(([date, data]) => ({
+      date,
+      usage: data.usage,
+      cost: data.cost
+    }))
 
   return { totalUsage, totalCost, profile }
 }
@@ -255,9 +266,9 @@ export async function computeStatsBundle(userId: string, meterId?: string): Prom
     })
 
     // Aggregate data
-    const mtdAgg = aggregateReadings(mtdReadings)
-    const prevMonthFullAgg = aggregateReadings(prevMonthReadings)
-    const prevMonthSamePeriodAgg = aggregateReadings(prevMonthSamePeriodReadings)
+    const mtdAgg = aggregateReadings(mtdReadings, window)
+    const prevMonthFullAgg = aggregateReadings(prevMonthReadings, { ...window, daysInMonth: 31 }) // Simplified
+    const prevMonthSamePeriodAgg = aggregateReadings(prevMonthSamePeriodReadings, window)
 
     // Recalculate costs using tariff engine for accuracy
     const mtdCostAccurate = mtdAgg.totalUsage > 0 ? tariffEngine(mtdAgg.totalUsage).totalCost : 0
@@ -271,20 +282,50 @@ export async function computeStatsBundle(userId: string, meterId?: string): Prom
       prevMonthFullAgg.totalUsage // Use same month as baseline for historical score
     )
 
+    // Check if month ended
+    const isMonthEnd = window.daysElapsed === window.daysInMonth
+
     // Forecast current month
-    const forecastResult = forecastUsage(
-      mtdAgg.totalUsage,
-      window.daysElapsed,
-      window.daysInMonth,
-      mtdAgg.profile,
-      prevMonthFullAgg.profile
-    )
+    let forecastResult: { usage: number; method: 'proportional' | 'profile_scaled' | 'last_month_blend' | 'actual' }
     
-    const forecastCost = forecastResult.usage > 0 ? tariffEngine(forecastResult.usage).totalCost : 0
+    if (isMonthEnd) {
+      forecastResult = { usage: mtdAgg.totalUsage, method: 'actual' }
+    } else {
+      const fr = forecastUsage(
+        mtdAgg.totalUsage,
+        window.daysElapsed,
+        window.daysInMonth,
+        mtdAgg.profile,
+        prevMonthFullAgg.profile
+      )
+      forecastResult = { ...fr }
+    }
+    
+    const forecastCost = isMonthEnd ? mtdCostAccurate : (forecastResult.usage > 0 ? tariffEngine(forecastResult.usage).totalCost : 0)
 
     // Budget calculations
     const monthlyBudget = getBudgetFromStorage()
     const proratedBudget = monthlyBudget ? (monthlyBudget * window.daysElapsed) / window.daysInMonth : 0
+
+    // Forecast vs Predicted Status
+    const forecastDelta = monthlyBudget ? forecastCost - monthlyBudget : 0
+    let forecastStatus: 'below_forecast' | 'on_track' | 'exceeded' = 'on_track'
+    let forecastColor: 'green' | 'yellow' | 'red' = 'green'
+
+    if (forecastDelta < -500) {
+      forecastStatus = 'below_forecast'
+      forecastColor = 'green'
+    } else if (forecastDelta > 500) {
+      forecastStatus = 'exceeded'
+      forecastColor = 'red'
+    }
+
+    // Budget Status
+    let budgetStatusStr: BudgetMetrics['status'] = 'On Track'
+    if (monthlyBudget) {
+        if (forecastCost > monthlyBudget) budgetStatusStr = 'Over Budget'
+        else if (forecastCost > monthlyBudget * 0.9) budgetStatusStr = 'At Risk'
+    }
 
     // Calculate budget metrics
     const budgetMetrics: BudgetMetrics = {
@@ -298,9 +339,7 @@ export async function computeStatsBundle(userId: string, meterId?: string): Prom
         delta_pkr: monthlyBudget ? forecastCost - monthlyBudget : 0,
         pct_over: monthlyBudget ? Math.max(0, ((forecastCost - monthlyBudget) / monthlyBudget) * 100) : 0
       },
-      status: monthlyBudget ? 
-        (forecastCost > monthlyBudget ? 'Over Budget' :
-         forecastCost > monthlyBudget * 0.95 ? 'At Risk' : 'On Track') : 'On Track',
+      status: budgetStatusStr,
       remaining_to_budget_pkr: monthlyBudget ? Math.max(0, monthlyBudget - mtdCostAccurate) : 0,
       projected_overrun_pkr: monthlyBudget ? Math.max(0, forecastCost - monthlyBudget) : 0
     }
@@ -333,7 +372,7 @@ export async function computeStatsBundle(userId: string, meterId?: string): Prom
       timeframeLabels: {
         mtd: 'MTD',
         prevMonthFull: 'Last Month (Full)',
-        forecast: 'Forecast (This Month)'
+        forecast: isMonthEnd ? 'Actual Bill' : 'Forecast (This Month)'
       },
       window,
       mtd: {

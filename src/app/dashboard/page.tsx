@@ -281,7 +281,7 @@ const Dashboard: React.FC = () => {
       <SetBudgetModal
         isOpen={showBudgetModal}
         onClose={() => setShowBudgetModal(false)}
-        onSetBudget={handleBudgetSet}
+        onBudgetSet={handleBudgetSet}
         currentBudget={monthlyBudget ?? undefined}
       />
     </div>

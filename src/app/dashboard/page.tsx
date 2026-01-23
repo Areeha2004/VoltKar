@@ -1,8 +1,6 @@
 "use client";
 import React, { useState, useEffect } from "react";
 import { useSession } from "next-auth/react";
-import Image from "next/image";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 
 import {
@@ -20,97 +18,39 @@ import {
   ArrowDown,
   Activity,
   Lightbulb,
-  Wallet
+  Wallet,
+  Calendar
 } from "lucide-react";
 
 import Navbar from "../../components/layout/Navbar";
 import Sidebar from "../../components/layout/Sidebar";
 import Card from "../../components/ui/Card";
 import Button from "../../components/ui/Button";
-import SlabProgressIndicator from "../../components/readings/SlabProgressIndicator";
-import SlabWarningAlert from "../../components/ui/SlabWarningAlert";
 import SetBudgetModal from "../../components/budget/SetBudgetModal";
-import BudgetProgressCard from "../../components/budget/BudgetProgressCard";
-import AnomalyAlert from "../../components/analytics/AnomalyAlert";
-import BudgetMonitorCard from "../../components/analytics/BudgetMonitorCard";
 
-import { generateUsageInsights } from "../../lib/insights";
-import { calculateBudgetStatus, getBudgetFromStorage, generateBudgetInsights } from "../../lib/budgetManager";
-import { MonthlyBreakdown, Reading } from "@/lib/analytics";
+import { getBudgetFromStorage } from "../../lib/budgetManager";
+import { StatsBundle } from "@/lib/statService";
 
-interface DashboardProps {
-  breakdown: MonthlyBreakdown;
-  readings: Reading[];
-}
+const Dashboard: React.FC = () => {
+  const { data: session } = useSession();
+  const name = session?.user?.name ?? session?.user?.email?.split("@")[0] ?? "User";
 
-const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
-  const { data: session, status } = useSession();
-  const name =
-    session?.user?.name ??
-    session?.user?.email?.split("@")[0] ??
-    "User";
-
-  const image = session?.user?.image;
-  const initials = name.split(" ").map((p) => p[0]).join("").slice(0, 2);
-
-  const [dashboardStats, setDashboardStats] = useState<any>(null);
+  const [stats, setStats] = useState<StatsBundle | null>(null);
   const [loading, setLoading] = useState(true);
-  const [alerts, setAlerts] = useState<any[]>([]);
-  const [analyticsData, setAnalyticsData] = useState<any>(null);
-  const [costInsights, setCostInsights] = useState<any[]>([]);
-  const [insights, setInsights] = useState<any[]>([]);
-  const [budgetStatus, setBudgetStatus] = useState<any>(null);
   const [showBudgetModal, setShowBudgetModal] = useState(false);
   const [monthlyBudget, setMonthlyBudget] = useState<number | null>(null);
-  const [anomalies, setAnomalies] = useState<any[]>([]);
 
-  // Load budget from localStorage
   useEffect(() => {
-    const budget = getBudgetFromStorage();
-    setMonthlyBudget(budget);
+    setMonthlyBudget(getBudgetFromStorage());
   }, []);
 
-  // Calculate budget status when data is available
   useEffect(() => {
-    if (dashboardStats && monthlyBudget !== null) {
-      const currentDate = new Date();
-      const daysInMonth = new Date(currentDate.getFullYear(), currentDate.getMonth() + 1, 0).getDate();
-      const daysElapsed = currentDate.getDate();
-      
-      const status = calculateBudgetStatus(
-        dashboardStats.stats.costToDate,
-        dashboardStats.stats.forecastBill,
-        daysElapsed,
-        daysInMonth,
-        monthlyBudget || undefined
-      );
-      setBudgetStatus(status);
-    }
-  }, [dashboardStats, monthlyBudget]);
-
-  // Fetch dashboard stats
-  useEffect(() => {
-    const fetchDashboardStats = async () => {
+    const fetchStats = async () => {
       try {
         const response = await fetch("/api/dashboard/stats");
         if (response.ok) {
           const data = await response.json();
-          setDashboardStats(data);
-          setAlerts(data.alerts || []);
-        }
-
-        // Fetch cost insights for mini cards
-        const costResponse = await fetch("/api/analytics/costs");
-        if (costResponse.ok) {
-          const costData = await costResponse.json();
-          setCostInsights(costData.data.insights?.slice(0, 2) || []);
-        }
-
-        // Fetch anomalies for dashboard
-        const anomalyResponse = await fetch("/api/analytics/anomalies");
-        if (anomalyResponse.ok) {
-          const anomalyData = await anomalyResponse.json();
-          setAnomalies(anomalyData.data.anomalies?.slice(0, 3) || []);
+          setStats(data);
         }
       } catch (error) {
         console.error("Failed to fetch dashboard stats:", error);
@@ -120,611 +60,232 @@ const Dashboard: React.FC<DashboardProps> = ({ breakdown, readings }) => {
     };
 
     if (session?.user?.id) {
-      fetchDashboardStats();
-    }
-  }, [session?.user?.id]);
-
-  // Fetch analytics data
-  useEffect(() => {
-    const fetchAnalytics = async () => {
-      try {
-        const response = await fetch("/api/analytics/usage");
-        if (response.ok) {
-          const data = await response.json();
-          setAnalyticsData(data.data);
-        }
-      } catch (error) {
-        console.error("Failed to fetch analytics:", error);
-      }
-    };
-
-    if (session?.user?.id) {
-      fetchAnalytics();
+      fetchStats();
     }
   }, [session?.user?.id]);
 
   const handleBudgetSet = (budget: number) => {
     setMonthlyBudget(budget);
-    // Refresh dashboard stats to recalculate with new budget
     window.location.reload();
   };
 
-
-  const getMetrics = () => {
-    if (!dashboardStats) {
-      return [
-        { title: 'Current Usage', value: '0', unit: 'kWh', change: '0%', changeType: 'neutral', icon: Zap, gradient: 'from-accent-blue to-accent-purple' },
-        { title: 'Forecast Bill', value: '0', unit: 'PKR', change: '0%', changeType: 'neutral', icon: DollarSign, gradient: 'from-primary to-accent-cyan' },
-        { title: 'Cost to Date', value: '0', unit: 'PKR', change: '0%', changeType: 'neutral', icon: TrendingUp, gradient: 'from-accent-amber to-accent-pink' },
-        { title: 'Efficiency Score', value: '0', unit: '%', change: '0%', changeType: 'neutral', icon: Target, gradient: 'from-accent-emerald to-primary' }
-      ]
-    }
-
-    return [
-    {
-      title: 'Current Usage',
-      value: dashboardStats.stats.currentUsage.toString(),
-      unit: 'kWh',
-      change: dashboardStats.stats.usageChange,
-      changeType: dashboardStats.stats.usageChange.startsWith('+') ? 'increase' : 'decrease',
-      icon: Zap,
-      gradient: 'from-accent-blue to-accent-purple'
-    },
-    {
-      title: 'Forecast Bill',
-      value: dashboardStats.stats.forecastBill.toLocaleString(),
-      unit: 'PKR',
-      change: dashboardStats.stats.costChange,
-      changeType: dashboardStats.stats.usageChange.startsWith('+') ? 'increase' : 'decrease',
-      icon: DollarSign,
-      gradient: 'from-primary to-accent-cyan'
-    },
-    {
-      title: 'Cost to Date',
-      value: dashboardStats.stats.costToDate.toLocaleString(),
-      unit: 'PKR',
-      change: dashboardStats.stats.costChange,
-      changeType: dashboardStats.stats.usageChange.startsWith('+') ? 'increase' : 'decrease',
-      icon: TrendingUp,
-      gradient: 'from-accent-amber to-accent-pink'
-    },
-    {
-      title: 'Efficiency Score',
-      value: dashboardStats.stats.efficiencyScore.toString(),
-      unit: '%',
-      change: '+12%',
-      changeType: 'decrease',
-      icon: Target,
-      gradient: 'from-accent-emerald to-primary'
-    }
-    ]
-  }
-
-  if (loading) {
+  if (loading || !stats) {
     return (
-      <div className="min-h-screen bg-background">
-        <Navbar />
-        <div className="flex">
-          <Sidebar />
-          <main className="flex-1 p-8">
-            <div className="max-w-7xl mx-auto">
-              <div className="animate-pulse space-y-8">
-                <div className="h-8 bg-background-card rounded w-1/3"></div>
-                <div className="grid md:grid-cols-4 gap-6">
-                  {[1, 2, 3, 4].map(i => (
-                    <div key={i} className="h-32 bg-background-card rounded-2xl"></div>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </main>
-        </div>
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary"></div>
       </div>
-    )
+    );
   }
 
-  const recentReadings = [
-    { date: '2024-01-15', meter: 'Main House', reading: 15420, usage: 180, cost: 3200 },
-    { date: '2024-01-10', meter: 'Main House', reading: 15240, usage: 165, cost: 2950 },
-    { date: '2024-01-05', meter: 'Guest House', reading: 8750, usage: 95, cost: 1700 },
-  ]
+  const { mtd, forecast, budget, window: timeWindow } = stats;
+  const isMonthEnd = timeWindow.daysElapsed === timeWindow.daysInMonth;
+  const progressPercent = (timeWindow.daysElapsed / timeWindow.daysInMonth) * 100;
 
-  const quickActions = [
-    { icon: Plus, label: 'Enter Reading', href: '/readings', color: 'from-primary to-accent-cyan' },
-    { icon: TrendingUp, label: 'View Analytics', href: '/analytics', color: 'from-accent-blue to-accent-purple' },
-    { icon: Settings, label: 'Manage Devices', href: '/devices', color: 'from-accent-amber to-accent-pink' },
-    { icon: Target, label: 'Start Challenge', href: '/challenges', color: 'from-accent-emerald to-primary' }
-  ]
-
-  const getAlertIcon = (type: string) => {
-    switch (type) {
-      case 'warning':
-        return <AlertTriangle className="h-5 w-5 text-accent-amber" />
-      case 'success':
-        return <CheckCircle className="h-5 w-5 text-primary" />
-      case 'info':
-        return <Info className="h-5 w-5 text-accent-blue" />
-      default:
-        return <Info className="h-5 w-5" />
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'Over Budget': return 'text-red-500 bg-red-500/10 border-red-500/20';
+      case 'At Risk': return 'text-amber-500 bg-amber-500/10 border-amber-500/20';
+      default: return 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20';
     }
-  }
-
-  const getAlertBorder = (priority: string) => {
-    switch (priority) {
-      case 'high': return 'border-l-4 border-l-accent-amber'
-      case 'medium': return 'border-l-4 border-l-primary'
-      case 'low': return 'border-l-4 border-l-accent-blue'
-      default: return ''
-    }
-  }
+  };
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Background Effects */}
       <div className="fixed inset-0 mesh-gradient pointer-events-none opacity-30" />
-      
       <Navbar />
-      
       <div className="flex">
         <Sidebar />
-        
         <main className="flex-1 p-8">
-          <div className="max-w-7xl mx-auto space-y-8">
+          <div className="max-w-5xl mx-auto space-y-8">
             {/* Header */}
-            <div className="flex items-center justify-between animate-fade-in">
-              <div className="space-y-2">
-                <h1 className="text-4xl font-bold text-foreground font-sora">
-                  Good morning, <span className="gradient-text">{name}</span>
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-3xl font-bold text-foreground font-sora">
+                  Welcome back, <span className="gradient-text">{name}</span>
                 </h1>
-                <p className="text-xl text-foreground-secondary">Here's your electricity overview for today</p>
+                <p className="text-foreground-secondary mt-1">
+                  {isMonthEnd ? "Month finalized. Review your actual usage below." : "Current month tracking and forecasting."}
+                </p>
               </div>
-              <div className="flex items-center space-x-4">
-                {!monthlyBudget && (
-                  <Button 
-                    variant="outline" 
-                    onClick={() => setShowBudgetModal(true)}
-                    className="border-primary/50 text-primary hover:bg-primary/10"
-                  >
-                    <Wallet className="h-5 w-5 mr-2" />
-                    Set Budget
+              <div className="flex gap-3">
+                <Button variant="outline" onClick={() => setShowBudgetModal(true)}>
+                  <Wallet className="h-4 w-4 mr-2" />
+                  {monthlyBudget ? `Rs ${monthlyBudget.toLocaleString()}` : "Set Budget"}
+                </Button>
+                <Link href="/readings">
+                  <Button className="premium-button">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Enter Reading
                   </Button>
-                )}
-                <Button  className="premium-button h-13">
-                  <Plus className="h-4 w-5 mr-2" />
-                  Enter Reading
-                </Button>
-                <Button variant="outline" size="md">
-                  <Settings className="h-5 w-5 mr-2" />
-                  Optimize
-                </Button>
+                </Link>
               </div>
             </div>
 
-            {/* Metrics Grid */}
-            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {getMetrics().map((metric, index) => (
-                <Card key={index} className="card-premium animate-fade-in"><div style={{ animationDelay: `${index * 0.1}s` }}>
-                   <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="relative">
-                        <div className={`absolute inset-0 bg-gradient-to-r ${metric.gradient} rounded-2xl blur-xl opacity-20`} />
-                        <div className={`relative bg-gradient-to-r ${metric.gradient} p-3 rounded-2xl`}>
-                          <metric.icon className="h-6 w-6 text-white" />
-                        </div>
-                      </div>
-                      <div className={`flex items-center space-x-1 text-sm font-medium ${
-                        metric.changeType === 'decrease' ? 'text-primary' : 'text-accent-amber'
-                      }`}>
-                        {metric.changeType === 'decrease' ? 
-                          <ArrowDown className="h-4 w-4" /> : 
-                          <ArrowUp className="h-4 w-4" />
-                        }
-                        <span>{metric.change}</span>
-                      </div>
-                    </div>
-                    
-                    <div className="space-y-1">
-                      <p className="text-foreground-secondary text-sm font-medium">{metric.title}</p>
-                      <div className="flex items-baseline space-x-2">
-                        <span className="text-3xl font-bold text-foreground font-mono">{metric.value}</span>
-                        <span className="text-foreground-tertiary text-sm">{metric.unit}</span>
-                      </div>
-                      <p className="text-xs text-foreground-muted">vs last month</p>
-                    </div>
+            {/* Primary Section – Current Month (MTD Focus) */}
+            <div className="grid md:grid-cols-3 gap-6">
+              <Card className="card-premium">
+                <div className="flex justify-between items-start mb-4">
+                  <div className="bg-blue-500/10 p-2 rounded-xl">
+                    <Zap className="h-6 w-6 text-blue-500" />
                   </div>
+                  <span className="text-xs font-medium text-foreground-muted uppercase tracking-wider">Usage MTD</span>
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-4xl font-bold font-mono">{mtd.usage_kwh.toLocaleString()}</span>
+                    <span className="text-foreground-tertiary">kWh</span>
                   </div>
-                 
-                </Card>
-              ))}
+                  <p className="text-sm text-foreground-secondary">Units consumed this month</p>
+                </div>
+              </Card>
+
+              <Card className="card-premium">
+                <div className="flex justify-between items-start mb-4">
+                  <div className="bg-emerald-500/10 p-2 rounded-xl">
+                    <DollarSign className="h-6 w-6 text-emerald-500" />
+                  </div>
+                  <span className="text-xs font-medium text-foreground-muted uppercase tracking-wider">Cost MTD</span>
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-4xl font-bold font-mono">Rs {mtd.cost_pkr.toLocaleString()}</span>
+                  </div>
+                  <p className="text-sm text-foreground-secondary">Accrued cost so far</p>
+                </div>
+              </Card>
+
+              <Card className="card-premium relative overflow-hidden">
+                <div className="flex justify-between items-start mb-4">
+                  <div className="bg-purple-500/10 p-2 rounded-xl">
+                    {isMonthEnd ? <Calendar className="h-6 w-6 text-purple-500" /> : <TrendingUp className="h-6 w-6 text-purple-500" />}
+                  </div>
+                  <span className="text-xs font-medium text-foreground-muted uppercase tracking-wider">
+                    {isMonthEnd ? "Actual Bill" : "Forecasted Bill"}
+                  </span>
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-4xl font-bold font-mono text-purple-500">Rs {forecast.cost_pkr.toLocaleString()}</span>
+                  </div>
+                  <p className="text-sm text-foreground-secondary">
+                    {isMonthEnd ? "Final bill for the month" : "Projected end-of-month cost"}
+                  </p>
+                </div>
+                {!isMonthEnd && (
+                  <div className="absolute bottom-0 left-0 right-0 h-1 bg-background-card">
+                    <div 
+                      className="h-full bg-purple-500 transition-all duration-1000" 
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                )}
+              </Card>
             </div>
 
-            {/* Budget Progress Card */}
-            {budgetStatus && (
-              <BudgetProgressCard
-                budgetStatus={budgetStatus}
-                onSetBudget={() => setShowBudgetModal(true)}
-              />
-            )}
+            {/* Forecast & Budget Comparison */}
+            <div className="grid md:grid-cols-2 gap-8">
+              <Card className="card-premium">
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-xl font-semibold flex items-center gap-2">
+                    <Target className="h-5 w-5 text-primary" />
+                    Budget Tracking
+                  </h2>
+                  <div className={`px-3 py-1 rounded-full text-xs font-bold border ${getStatusColor(budget.status)}`}>
+                    {budget.status.toUpperCase()}
+                  </div>
+                </div>
 
-            {/* No Budget Set Alert */}
-            {!monthlyBudget && (
-              <Card className="card-premium border-l-4 border-l-primary bg-gradient-to-r from-primary/5 to-accent-cyan/5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
-                    <div className="bg-gradient-to-r from-primary to-accent-cyan p-3 rounded-2xl">
-                      <Wallet className="h-6 w-6 text-white" />
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-foreground-secondary">Monthly Budget</span>
+                      <span className="font-semibold">Rs {monthlyBudget?.toLocaleString() ?? "Not Set"}</span>
                     </div>
-                    <div>
-                      <h3 className="text-xl font-semibold text-foreground">Set Your Monthly Budget</h3>
-                      <p className="text-foreground-secondary">
-                        Track your electricity spending and get alerts when approaching your limit
+                    <div className="h-3 bg-background-card rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full transition-all duration-1000 ${
+                          budget.status === 'Over Budget' ? 'bg-red-500' :
+                          budget.status === 'At Risk' ? 'bg-amber-500' : 'bg-primary'
+                        }`}
+                        style={{ width: `${Math.min(100, (forecast.cost_pkr / (monthlyBudget || 1)) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-4 rounded-2xl bg-background-card/50">
+                      <p className="text-xs text-foreground-muted uppercase mb-1">Projected Overrun</p>
+                      <p className={`text-xl font-bold ${budget.projected_overrun_pkr > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                        Rs {budget.projected_overrun_pkr.toLocaleString()}
                       </p>
                     </div>
+                    <div className="p-4 rounded-2xl bg-background-card/50">
+                      <p className="text-xs text-foreground-muted uppercase mb-1">Remaining Budget</p>
+                      <p className="text-xl font-bold">Rs {budget.remaining_to_budget_pkr.toLocaleString()}</p>
+                    </div>
                   </div>
-                  <Button 
-                    className="premium-button"
-                    onClick={() => setShowBudgetModal(true)}
-                  >
-                    <Target className="h-5 w-5 mr-2" />
-                    Set Budget
-                  </Button>
                 </div>
               </Card>
-            )}
 
-            <div className="grid lg:grid-cols-3 gap-8">
-              {/* Slab Warning Alert */}
-              {dashboardStats?.stats.hasSlabWarnings && (
-                <div className="lg:col-span-3">
-                  <SlabWarningAlert 
-                    units={dashboardStats.stats.currentUsage} 
-                    showSuggestions={true}
-                  />
-                </div>
-              )}
-
-              {/* Slab Progress Indicator */}
-              {analyticsData && (
-                <div className="lg:col-span-2">
-                  <Card className="card-premium">
-                    <div className="space-y-6">
-                      <div className="flex items-center space-x-3">
-                        <div className="bg-gradient-to-r from-accent-blue to-accent-purple p-2 rounded-xl">
-                          <TrendingUp className="h-6 w-6 text-white" />
-                        </div>
-                        <div>
-                          <h2 className="text-xl font-semibold text-foreground font-sora">Weekly Usage Breakdown</h2>
-                          <p className="text-foreground-secondary text-sm">Current month progress</p>
-                        </div>
-                      </div>
-                      
-                      <div className="grid grid-cols-5 gap-4">
-                        {analyticsData.weeklyBreakdown.map((week: any, index: number) => (
-                          <div key={week.week} className="text-center p-4 rounded-2xl bg-background-card/30 border border-border/30">
-                            <div className="space-y-2">
-                              <p className="text-sm text-foreground-secondary">Week {week.week}</p>
-                              <p className="text-2xl font-bold text-foreground font-mono">{week.usage}</p>
-                              <p className="text-xs text-foreground-tertiary">kWh</p>
-                              <div className="pt-2 border-t border-border/30">
-                                <p className="text-sm font-semibold text-primary">Rs {Math.round(week.cost).toLocaleString()}</p>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-4 pt-4 border-t border-border/30">
-                        <div className="text-center p-3 rounded-xl bg-background-card/50">
-                          <p className="text-sm text-foreground-secondary">MTD Usage</p>
-                          <p className="text-xl font-bold text-foreground">{analyticsData.monthToDateUsage} kWh</p>
-                        </div>
-                        <div className="text-center p-3 rounded-xl bg-background-card/50">
-                          <p className="text-sm text-foreground-secondary">MTD Cost</p>
-                          <p className="text-xl font-bold text-primary">Rs {Math.round(analyticsData.monthToDateCost).toLocaleString()}</p>
-                        </div>
-                        <div className="text-center p-3 rounded-xl bg-background-card/50">
-                          <p className="text-sm text-foreground-secondary">Daily Avg</p>
-                          <p className="text-xl font-bold text-foreground">{analyticsData.averageDailyUsage} kWh</p>
-                        </div>
-                      </div>
+              <Card className="card-premium">
+                <h2 className="text-xl font-semibold flex items-center gap-2 mb-6">
+                  <Activity className="h-5 w-5 text-accent-blue" />
+                  Comparison Insights
+                </h2>
+                <div className="space-y-4">
+                  <div className="flex items-center gap-4 p-4 rounded-2xl bg-background-card/50 border border-border/30">
+                    <div className="bg-accent-blue/10 p-3 rounded-xl">
+                      <Clock className="h-5 w-5 text-accent-blue" />
                     </div>
-                  </Card>
-                </div>
-              )}
-
-              {/* Forecast Card */}
-              <div className={dashboardStats?.stats.currentUsage > 0 ? "" : "lg:col-span-2"}>
-                <ForecastCard />
-              </div>
-
-              {/* Original Slab Progress Indicator */}
-              {dashboardStats?.stats.currentUsage > 0 && (
-                <div className="lg:col-span-2">
-                  <SlabProgressIndicator 
-                    currentUnits={dashboardStats.stats.currentUsage}
-                    projectedUnits={dashboardStats.stats.projectedMonthlyUsage || dashboardStats.stats.currentUsage * 4}
-                  />
-                </div>
-              )}
-
-              {/* Alerts Panel - Adjust column span based on analytics data */}
-              <div className={dashboardStats?.stats.currentUsage > 0 ? "" : "lg:col-span-2"}>
-                <Card className="card-premium">
-                  <div className="space-y-6">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        <div className="bg-gradient-to-r from-accent-amber to-accent-pink p-2 rounded-xl">
-                          <Activity className="h-5 w-5 text-white" />
-                        </div>
-                        <h2 className="text-2xl font-semibold text-foreground font-sora">Smart Alerts</h2>
-                      </div>
-                      <Button variant="ghost" size="sm">View All</Button>
-                    </div>
-                    
-                    <div className="space-y-4">
-                      {/* Budget Insights */}
-                      {budgetStatus && generateBudgetInsights(budgetStatus).map((insight, index) => (
-                        <div key={`budget-${index}`} className={`flex items-start space-x-4 p-6 rounded-2xl bg-background-card/50 backdrop-blur-sm border-l-4 ${
-                          insight.type === 'critical' ? 'border-l-red-500' :
-                          insight.type === 'warning' ? 'border-l-accent-amber' :
-                          insight.type === 'success' ? 'border-l-primary' :
-                          'border-l-accent-blue'
-                        } animate-fade-in`} style={{ animationDelay: `${index * 0.1}s` }}>
-                          <div className="flex-shrink-0 mt-1">
-                            {insight.type === 'critical' ? <AlertTriangle className="h-5 w-5 text-red-500" /> :
-                             insight.type === 'warning' ? <AlertTriangle className="h-5 w-5 text-accent-amber" /> :
-                             insight.type === 'success' ? <CheckCircle className="h-5 w-5 text-primary" /> :
-                             <Info className="h-5 w-5 text-accent-blue" />}
-                          </div>
-                          <div className="flex-1 space-y-2">
-                            <h3 className="font-semibold text-foreground text-lg">{insight.title}</h3>
-                            <p className="text-foreground-secondary leading-relaxed">{insight.message}</p>
-                            {insight.impact && (
-                              <p className="text-primary text-sm font-medium">{insight.impact}</p>
-                            )}
-                            <p className="text-foreground-muted text-sm">Budget Analysis</p>
-                          </div>
-                        </div>
-                      ))}
-
-                      {alerts.map((alert, index) => (
-                        <div key={index} className={`flex items-start space-x-4 p-6 rounded-2xl bg-background-card/50 backdrop-blur-sm ${getAlertBorder(alert.priority)} animate-fade-in`} style={{ animationDelay: `${index * 0.1}s` }}>
-                          <div className="flex-shrink-0 mt-1">
-                            {getAlertIcon(alert.type)}
-                          </div>
-                          <div className="flex-1 space-y-2">
-                            <h3 className="font-semibold text-foreground text-lg">{alert.title}</h3>
-                            <p className="text-foreground-secondary leading-relaxed">{alert.message}</p>
-                            <p className="text-foreground-muted text-sm">{alert.time}</p>
-                          </div>
-                        </div>
-                      ))}
-                      
-                      {/* Cost Insights Mini Cards */}
-                      {costInsights.map((insight, index) => (
-                        <div key={`cost-${index}`} className={`flex items-start space-x-4 p-6 rounded-2xl bg-background-card/50 backdrop-blur-sm border-l-4 ${
-                          insight.type === 'warning' ? 'border-l-accent-amber' :
-                          insight.type === 'success' ? 'border-l-primary' :
-                          'border-l-accent-blue'
-                        } animate-fade-in`} style={{ animationDelay: `${(alerts.length + index) * 0.1}s` }}>
-                          <div className="flex-shrink-0 mt-1">
-                            {insight.type === 'warning' ? <AlertTriangle className="h-5 w-5 text-accent-amber" /> :
-                             insight.type === 'success' ? <CheckCircle className="h-5 w-5 text-primary" /> :
-                             <Info className="h-5 w-5 text-accent-blue" />}
-                          </div>
-                          <div className="flex-1 space-y-2">
-                            <h3 className="font-semibold text-foreground text-lg">{insight.title}</h3>
-                            <p className="text-foreground-secondary leading-relaxed">{insight.message}</p>
-                            {insight.impact && (
-                              <p className="text-primary text-sm font-medium">{insight.impact}</p>
-                            )}
-                            <p className="text-foreground-muted text-sm">Cost Analysis</p>
-                          </div>
-                        </div>
-                      ))}
+                    <div>
+                      <p className="text-sm font-semibold">{timeWindow.daysElapsed} days passed</p>
+                      <p className="text-xs text-foreground-secondary">{timeWindow.daysInMonth - timeWindow.daysElapsed} days remaining in cycle</p>
                     </div>
                   </div>
 
-                  {/* Anomaly Alerts */}
-                  {anomalies.length > 0 && (
+                  {isMonthEnd ? (
+                    <div className="space-y-4">
+                      <div className={`p-4 rounded-2xl border ${forecast.cost_pkr <= (monthlyBudget || 0) ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-red-500/5 border-red-500/20'}`}>
+                        <p className="text-sm font-medium">
+                          {forecast.cost_pkr <= (monthlyBudget || 0) 
+                            ? "🎉 Success! You stayed under your budget this month." 
+                            : "⚠️ Budget exceeded. Consider reviewing high-usage devices."}
+                        </p>
+                      </div>
+                      <div className="flex justify-between items-center text-sm p-2">
+                        <span className="text-foreground-secondary">Actual vs Forecast</span>
+                        <span className="font-mono text-foreground-secondary">
+                          Matched Expected
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
                     <div className="space-y-3">
-                      <h4 className="font-medium text-foreground">System Alerts</h4>
-                      {anomalies.map((anomaly, index) => (
-                        <AnomalyAlert
-                          key={anomaly.id}
-                          anomaly={anomaly}
-                          compact={true}
-                          className="animate-fade-in"
-                          style={{ animationDelay: `${index * 0.1}s` }}
-                        />
-                      ))}
+                      <p className="text-sm text-foreground-secondary leading-relaxed">
+                        Based on your current pace, you are projected to spend 
+                        <span className="font-bold text-foreground"> Rs {forecast.cost_pkr.toLocaleString()} </span>
+                        by the end of {timeWindow.now.toLocaleString('default', { month: 'long' })}.
+                      </p>
+                      <div className="flex items-center gap-2 text-xs text-foreground-muted">
+                        <Info className="h-3 w-3" />
+                        Forecasting uses {forecast.method} calculation logic.
+                      </div>
                     </div>
                   )}
-                </Card>
-              </div>
-
-              {/* Quick Actions */}
-              <Card className="card-premium">
-                <div className="space-y-6">
-                  <div className="flex items-center space-x-3">
-                    <div className="bg-gradient-to-r from-primary to-accent-cyan p-2 rounded-xl">
-                      <Lightbulb className="h-5 w-5 text-white" />
-                    </div>
-                    <h2 className="text-2xl font-semibold text-foreground font-sora">Quick Actions</h2>
-                  </div>
-                  
-                  <div className="space-y-3">
-                    {quickActions.map((action, index) => (
-                      <button
-                        key={index}
-                        className="w-full flex items-center space-x-4 p-4 rounded-2xl bg-background-card/30 hover:bg-background-card/60 border border-border/50 hover:border-border-light transition-all duration-300 group animate-fade-in"
-                        style={{ animationDelay: `${index * 0.1}s` }}
-                      >
-                        <div className={`bg-gradient-to-r ${action.color} p-3 rounded-xl group-hover:scale-110 transition-transform duration-300`}>
-                          <action.icon className="h-5 w-5 text-white" />
-                        </div>
-                        <span className="font-medium text-foreground text-lg">{action.label}</span>
-                      </button>
-                    ))}
-                  </div>
                 </div>
               </Card>
             </div>
-
-            {/* Budget Monitor Card */}
-            {monthlyBudget && (
-              <BudgetMonitorCard
-                budget={monthlyBudget}
-                onBudgetChange={handleBudgetSet}
-              />
-            )}
-
-            {/* Recent Readings */}
-            <Card className="card-premium">
-              <div className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <div className="bg-gradient-to-r from-accent-blue to-accent-purple p-2 rounded-xl">
-                      <Clock className="h-5 w-5 text-white" />
-                    </div>
-                    <h2 className="text-2xl font-semibold text-foreground font-sora">Recent Readings</h2>
-                  </div>
-                  <Button variant="ghost" size="sm">View All</Button>
-                </div>
-                
-                <div className="overflow-hidden rounded-2xl border border-border/50">
-                  <table className="w-full">
-                    <thead className="bg-background-card/50">
-                      <tr>
-                        <th className="text-left py-4 px-6 text-foreground-secondary font-medium">Date</th>
-                        <th className="text-left py-4 px-6 text-foreground-secondary font-medium">Meter</th>
-                        <th className="text-left py-4 px-6 text-foreground-secondary font-medium">Week</th>
-                        <th className="text-left py-4 px-6 text-foreground-secondary font-medium">Reading</th>
-                        <th className="text-left py-4 px-6 text-foreground-secondary font-medium">Usage</th>
-                        <th className="text-left py-4 px-6 text-foreground-secondary font-medium">Cost</th>
-                        <th className="text-left py-4 px-6 text-foreground-secondary font-medium">Type</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(dashboardStats?.recentReadings || recentReadings).map((reading: any, index: number) => (
-                        <tr key={index} className="border-t border-border/30 hover:bg-background-card/30 transition-colors">
-                          <td className="py-4 px-6 text-foreground font-mono">{reading.date}</td>
-                          <td className="py-4 px-6 text-foreground">{reading.meter}</td>
-                          <td className="py-4 px-6 text-foreground">
-                            <span className="px-2 py-1 rounded-full text-xs bg-background-card text-foreground-secondary">
-                              Week {reading.week || 1}
-                            </span>
-                          </td>
-                          <td className="py-4 px-6 text-foreground font-mono">{reading.reading?.toLocaleString() || '0'}</td>
-                          <td className="py-4 px-6 text-foreground font-mono">{reading.usage} kWh</td>
-                          <td className="py-4 px-6 text-primary font-mono font-semibold">Rs {(reading.cost || reading.estimatedCost || 0).toLocaleString()}</td>
-                          <td className="py-4 px-6">
-                            {reading.isOfficialEndOfMonth ? (
-                              <span className="px-2 py-1 rounded-full text-xs bg-primary/10 text-primary font-medium">
-                                Official
-                              </span>
-                            ) : (
-                              <span className="px-2 py-1 rounded-full text-xs bg-background-card text-foreground-secondary">
-                                Weekly
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </Card>
           </div>
         </main>
       </div>
-
-      {/* Budget Modal */}
       <SetBudgetModal
         isOpen={showBudgetModal}
         onClose={() => setShowBudgetModal(false)}
-        onBudgetSet={handleBudgetSet}
-        currentBudget={monthlyBudget || undefined}
+        onSetBudget={handleBudgetSet}
+        currentBudget={monthlyBudget}
       />
     </div>
-  )
-}
+  );
+};
 
-// Forecast Card Component
-const ForecastCard: React.FC = () => {
-  const [forecastData, setForecastData] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    const fetchForecast = async () => {
-      try {
-        const response = await fetch('/api/forecast/bill')
-        if (response.ok) {
-          const data = await response.json()
-          setForecastData(data.data)
-        }
-      } catch (error) {
-        console.error('Failed to fetch forecast:', error)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchForecast()
-  }, [])
-
-  if (loading) {
-    return (
-      <Card className="card-premium">
-        <div className="animate-pulse space-y-4">
-          <div className="h-6 bg-background-card rounded w-1/2"></div>
-          <div className="h-8 bg-background-card rounded w-1/3"></div>
-        </div>
-      </Card>
-    )
-  }
-
-  if (!forecastData) return null
-
-  return (
-    <Card className="card-premium">
-      <div className="space-y-6">
-        <div className="flex items-center space-x-3">
-          <div className="bg-gradient-to-r from-accent-emerald to-primary p-2 rounded-xl">
-            <Target className="h-6 w-6 text-white" />
-          </div>
-          <div>
-            <h2 className="text-xl font-semibold text-foreground font-sora">Monthly Forecast</h2>
-            <p className="text-foreground-secondary text-sm">Projected bill & usage</p>
-          </div>
-        </div>
-        
-        <div className="grid grid-cols-2 gap-4">
-          <div className="text-center p-4 rounded-2xl bg-gradient-to-br from-primary/10 to-accent-cyan/10 border border-primary/20">
-            <p className="text-sm text-foreground-secondary mb-2">Expected Usage</p>
-            <p className="text-3xl font-bold text-foreground font-mono">{forecastData.forecast.usage.expected}</p>
-            <p className="text-xs text-foreground-tertiary">kWh this month</p>
-          </div>
-          <div className="text-center p-4 rounded-2xl bg-gradient-to-br from-accent-amber/10 to-accent-pink/10 border border-accent-amber/20">
-            <p className="text-sm text-foreground-secondary mb-2">Expected Bill</p>
-            <p className="text-3xl font-bold text-primary font-mono">Rs {forecastData.forecast.bill.expected.toLocaleString()}</p>
-            <p className="text-xs text-foreground-tertiary">projected total</p>
-          </div>
-        </div>
-
-        {forecastData.comparison.vsLastMonth && (
-          <div className="text-center p-3 rounded-xl bg-background-card/30">
-            <p className="text-sm text-foreground-secondary">vs Last Month: 
-              <span className={`ml-2 font-semibold ${forecastData.comparison.vsLastMonth > 0 ? 'text-accent-amber' : 'text-primary'}`}>
-                {forecastData.comparison.vsLastMonth > 0 ? '+' : ''}{forecastData.comparison.vsLastMonth}%
-              </span>
-            </p>
-          </div>
-        )}
-      </div>
-    </Card>
-  )
-}
-
-export default Dashboard
+export default Dashboard;

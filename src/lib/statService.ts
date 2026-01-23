@@ -105,7 +105,11 @@ function getCurrentTimeWindow(): TimeWindow {
   const karachiTime = new Date(now.toLocaleString("en-US", { timeZone: TIMEZONE }))
   
   const monthStart = new Date(karachiTime.getFullYear(), karachiTime.getMonth(), 1)
+  const nextMonthStart = new Date(karachiTime.getFullYear(), karachiTime.getMonth() + 1, 1)
   const daysInMonth = new Date(karachiTime.getFullYear(), karachiTime.getMonth() + 1, 0).getDate()
+  
+  // Check if we are at the very end of the month (last day completed)
+  // For calculation purposes, we consider the day "elapsed" only if it's past
   const daysElapsed = karachiTime.getDate()
 
   return {

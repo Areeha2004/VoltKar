@@ -194,11 +194,15 @@ function forecastUsage(
     return { usage: 0, method: 'proportional' }
   }
 
+  // Calculate daily average from actual readings
+  // If we have readings, use the average per day elapsed
+  const dailyAverage = mtdUsage / daysElapsed;
+  const projectedUsage = dailyAverage * daysInMonth;
+
   if (daysElapsed < 3 && lastMonthProfile && lastMonthProfile.length > 0) {
-    // Method C: Blend with last month's profile
+    // Method C: Blend with last month's profile for better early-month accuracy
     const lastMonthAvgDaily = lastMonthProfile.reduce((sum, day) => sum + day.usage, 0) / lastMonthProfile.length
-    const currentAvgDaily = mtdUsage / daysElapsed
-    const blendedDaily = (currentAvgDaily + lastMonthAvgDaily) / 2
+    const blendedDaily = (dailyAverage + lastMonthAvgDaily) / 2
     
     return {
       usage: blendedDaily * daysInMonth,
@@ -207,7 +211,7 @@ function forecastUsage(
   }
 
   if (mtdProfile.length >= 7) {
-    // Method B: Profile-based scaling (simplified)
+    // Method B: Profile-based scaling
     const avgDailyFromProfile = mtdProfile.reduce((sum, day) => sum + day.usage, 0) / mtdProfile.length
     const scaledUsage = avgDailyFromProfile * daysInMonth
     
@@ -217,8 +221,7 @@ function forecastUsage(
     }
   }
 
-  // Method A: Simple proportional
-  const projectedUsage = (mtdUsage / daysElapsed) * daysInMonth
+  // Method A: Simple proportional based on daily average
   return {
     usage: projectedUsage,
     method: 'proportional'
@@ -363,12 +366,18 @@ export async function computeStatsBundle(userId: string, meterId?: string): Prom
       outliers: 0
     }
 
-    // Add warnings for data quality issues
+    // Add warnings for data quality and budget alerts
     if (mtdReadings.length === 0) {
       dataQuality.warnings.push('No readings found for current month')
     }
     if (window.daysElapsed > 7 && mtdReadings.length < 2) {
       dataQuality.warnings.push('Insufficient readings for accurate forecasting')
+    }
+    
+    // Budget warnings based on forecast
+    if (monthlyBudget && forecastCost > monthlyBudget) {
+      const overrunPct = Math.round(((forecastCost - monthlyBudget) / monthlyBudget) * 100)
+      dataQuality.warnings.push(`Forecasted bill (Rs ${Math.round(forecastCost).toLocaleString()}) is ${overrunPct}% above your budget!`)
     }
 
     // Build final stats bundle

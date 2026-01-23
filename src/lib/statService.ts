@@ -41,7 +41,7 @@ export interface PrevMonthMetrics {
 export interface ForecastMetrics {
   usage_kwh: number
   cost_pkr: number
-  method: 'proportional' | 'profile_scaled' | 'last_month_blend'
+  method: 'proportional' | 'profile_scaled' | 'last_month_blend' | 'actual'
   vs_prev_full: {
     delta_kwh: number
     delta_cost: number

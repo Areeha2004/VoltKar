@@ -41,7 +41,7 @@ export interface PrevMonthMetrics {
 export interface ForecastMetrics {
   usage_kwh: number
   cost_pkr: number
-  method: 'proportional' | 'profile_scaled' | 'last_month_blend' | 'actual'
+  method: 'proportional' | 'profile_scaled' | 'last_month_blend' | 'actual' | 'early_estimate' | 'blended'
   vs_prev_full: {
     delta_kwh: number
     delta_cost: number
@@ -187,20 +187,34 @@ function forecastUsage(
   daysElapsed: number,
   daysInMonth: number,
   mtdProfile: any[],
-  lastMonthProfile?: any[]
+  prevMonthUsage: number = 0
 ): { usage: number; method: ForecastMetrics['method'] } {
-  // Method A: Default proportional
-  if (daysElapsed === 0) {
-    return { usage: 0, method: 'proportional' }
+  // Method: Actual (Month end)
+  if (daysElapsed >= daysInMonth) {
+    return { usage: mtdUsage, method: 'actual' }
   }
 
-  // Calculate daily average from actual readings
-  // If we have readings, use the average per day elapsed (mtdUsage / daysElapsed) * 30
-  // Ensuring we use exactly the proportional logic requested (total / elapsed * 30)
-  const projectedUsage = (mtdUsage / daysElapsed) * daysInMonth;
+  // Method: Early Estimate (Days 1-4)
+  if (daysElapsed <= 4) {
+    return { 
+      usage: prevMonthUsage > 0 ? prevMonthUsage : (mtdUsage / Math.max(daysElapsed, 1)) * daysInMonth, 
+      method: 'early_estimate' 
+    }
+  }
 
+  const proportionalForecast = (mtdUsage / daysElapsed) * daysInMonth
+
+  // Method: Blended (Days 5-10)
+  if (daysElapsed <= 10) {
+    const blendedUsage = prevMonthUsage > 0 
+      ? (0.7 * prevMonthUsage) + (0.3 * proportionalForecast)
+      : proportionalForecast
+    return { usage: blendedUsage, method: 'blended' }
+  }
+
+  // Method: Proportional/Profile (Days 11+)
   return {
-    usage: projectedUsage,
+    usage: proportionalForecast,
     method: 'proportional'
   }
 }
@@ -298,7 +312,7 @@ export async function computeStatsBundle(userId: string, meterId?: string): Prom
     const isMonthEnd = window.daysElapsed === window.daysInMonth
 
     // Forecast current month
-    let forecastResult: { usage: number; method: 'proportional' | 'profile_scaled' | 'last_month_blend' | 'actual' }
+    let forecastResult: { usage: number; method: ForecastMetrics['method'] }
     
     if (isMonthEnd) {
       forecastResult = { usage: mtdAgg.totalUsage, method: 'actual' }
@@ -308,8 +322,14 @@ export async function computeStatsBundle(userId: string, meterId?: string): Prom
         window.daysElapsed,
         window.daysInMonth,
         mtdAgg.profile,
-        [] // Removed last month profile for simplicity as per requirements
+        prevMonthFullAgg.totalUsage
       )
+      
+      // Global safety cap: Forecasted usage must NEVER exceed previousMonthUsage * 1.4
+      if (prevMonthFullAgg.totalUsage > 0 && fr.usage > prevMonthFullAgg.totalUsage * 1.4) {
+        fr.usage = prevMonthFullAgg.totalUsage * 1.4
+      }
+      
       forecastResult = { ...fr }
     }
     
@@ -319,11 +339,16 @@ export async function computeStatsBundle(userId: string, meterId?: string): Prom
     const monthlyBudget = getBudgetFromStorage()
     const proratedBudget = monthlyBudget ? (monthlyBudget * window.daysElapsed) / window.daysInMonth : 0
 
-    // Budget Status
+    // Budget Status & Comparison
+    // If forecast.method === "early_estimate", budget comparisons use prev month cost
+    const effectiveForecastCost = forecastResult.method === 'early_estimate' && prevMonthFullAgg.totalCost > 0
+      ? prevMonthFullAgg.totalCost
+      : forecastCost
+
     let budgetStatusStr: BudgetMetrics['status'] = 'On Track'
     if (monthlyBudget) {
-        if (forecastCost > monthlyBudget) budgetStatusStr = 'Over Budget'
-        else if (forecastCost > monthlyBudget * 0.9) budgetStatusStr = 'At Risk'
+        if (effectiveForecastCost > monthlyBudget) budgetStatusStr = 'Over Budget'
+        else if (effectiveForecastCost > monthlyBudget * 0.9) budgetStatusStr = 'At Risk'
     }
 
     // Calculate budget metrics
@@ -335,12 +360,12 @@ export async function computeStatsBundle(userId: string, meterId?: string): Prom
         pct_used: monthlyBudget ? (mtdCostAccurate / monthlyBudget) * 100 : 0
       },
       forecast_vs_budget: {
-        delta_pkr: monthlyBudget ? forecastCost - monthlyBudget : 0,
-        pct_over: monthlyBudget ? Math.max(0, ((forecastCost - monthlyBudget) / monthlyBudget) * 100) : 0
+        delta_pkr: monthlyBudget ? effectiveForecastCost - monthlyBudget : 0,
+        pct_over: monthlyBudget ? Math.max(0, ((effectiveForecastCost - monthlyBudget) / monthlyBudget) * 100) : 0
       },
       status: budgetStatusStr,
       remaining_to_budget_pkr: monthlyBudget ? Math.max(0, monthlyBudget - mtdCostAccurate) : 0,
-      projected_overrun_pkr: monthlyBudget ? Math.max(0, forecastCost - monthlyBudget) : 0
+      projected_overrun_pkr: monthlyBudget ? Math.max(0, effectiveForecastCost - monthlyBudget) : 0
     }
 
     // Calculate optimization potential (simplified)

@@ -47,34 +47,31 @@ const AnalyticsPage: React.FC = () => {
     try {
       setLoading(true)
       
-      const [usageRes, costRes, forecastRes, comparisonRes, metersRes] = await Promise.all([
-        fetch('/api/analytics/usage'),
-        fetch('/api/analytics/costs'),
-        fetch('/api/forecast/bill'),
-        fetch('/api/analytics/comparisons?type=all'),
-        fetch('/api/meters')
-      ])
+      const [usageRes, costRes, metersRes] = await Promise.all([
+      fetch(`/api/analytics/usage${selectedMeter !== 'all' ? `?meterId=${selectedMeter}` : ''}`),
+      fetch(`/api/analytics/costs${selectedMeter !== 'all' ? `?meterId=${selectedMeter}` : ''}`),
+      fetch('/api/meters')
+    ])
 
-      if (usageRes.ok) {
-        const usage = await usageRes.json()
-        setUsageData(usage.data)
-      }
+    if (usageRes.ok) {
+      const usage = await usageRes.json()
+      setUsageData(usage.data)
+      // Forecast data is now embedded in stats bundle returned via usage/costs if we want
+      // But let's map it from costData for consistency
+    }
 
-      if (costRes.ok) {
-        const cost = await costRes.json()
-        setCostData(cost.data)
-        setInsights(cost.data.insights || [])
-      }
-
-      if (forecastRes.ok) {
-        const forecast = await forecastRes.json()
-        setForecastData(forecast.data)
-      }
-
-      if (comparisonRes.ok) {
-        const comparison = await comparisonRes.json()
-        setComparisonData(comparison.data)
-      }
+    if (costRes.ok) {
+      const cost = await costRes.json()
+      setCostData(cost.data)
+      setForecastData({
+        forecast: {
+          usage: { expected: cost.data.breakdown.projectedUsage },
+          bill: { expected: cost.data.costs.projectedCost }
+        },
+        comparison: { vsLastMonth: cost.data.comparison.vsLastMonth }
+      })
+      // setInsights(cost.data.insights || []) // Keep hardcoded as requested
+    }
 
       if (metersRes.ok) {
         const metersData = await metersRes.json()
@@ -136,11 +133,9 @@ const AnalyticsPage: React.FC = () => {
     { scenario: 'High', usage: forecastData.forecast.usage.high, cost: forecastData.forecast.bill.high }
   ] : []
 
-  const slabDistributionData = costData?.breakdown ? [
-    { name: '0-50 kWh', value: 50, cost: 197.5, color: '#00d4aa' },
-    { name: '51-100 kWh', value: 50, cost: 387, color: '#3b82f6' },
-    { name: '101-200 kWh', value: 100, cost: 1006, color: '#8b5cf6' },
-    { name: '201+ kWh', value: Math.max(0, (usageData?.monthToDateUsage || 0) - 200), cost: 0, color: '#f59e0b' }
+  const slabDistributionData = costData?.costs ? [
+    { name: 'MTD Usage', value: costData.breakdown.totalUsage, cost: costData.costs.actualToDateCost, color: '#3b82f6' },
+    { name: 'Remaining Projected', value: Math.max(0, costData.breakdown.projectedUsage - costData.breakdown.totalUsage), cost: Math.max(0, costData.costs.projectedCost - costData.costs.actualToDateCost), color: '#8b5cf6' },
   ].filter(item => item.value > 0) : []
 
   const getAnomalySeverityColor = (severity: string) => {

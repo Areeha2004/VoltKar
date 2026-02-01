@@ -98,26 +98,35 @@ const Dashboard: React.FC = () => {
         <main className="flex-1 p-8">
           <div className="max-w-5xl mx-auto space-y-8">
             {/* Header */}
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-3xl font-bold text-foreground font-sora">
-                  Welcome back, <span className="gradient-text">{name}</span>
-                </h1>
-                <p className="text-foreground-secondary mt-1">
-                  {isMonthEnd ? "Month finalized. Review your actual usage below." : "Current month tracking and forecasting."}
-                </p>
-              </div>
-              <div className="flex gap-3">
-                <Button variant="outline" onClick={() => setShowBudgetModal(true)}>
-                  <Wallet className="h-4 w-4 mr-2" />
-                  {monthlyBudget ? `Rs ${monthlyBudget.toLocaleString()}` : "Set Budget"}
-                </Button>
-                <Link href="/readings">
-                  <Button className="premium-button">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Enter Reading
+            <div className="flex flex-col space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h1 className="text-3xl font-bold text-foreground font-sora">
+                    Welcome back, <span className="gradient-text">{name}</span>
+                  </h1>
+                  <p className="text-foreground-secondary mt-1">
+                    {isMonthEnd ? "Month finalized. Review your actual usage below." : "Current month tracking and forecasting."}
+                  </p>
+                </div>
+                <div className="flex gap-3">
+                  <Button variant="outline" onClick={() => setShowBudgetModal(true)}>
+                    <Wallet className="h-4 w-4 mr-2" />
+                    {monthlyBudget ? `Rs ${monthlyBudget.toLocaleString()}` : "Set Budget"}
                   </Button>
-                </Link>
+                  <Link href="/readings">
+                    <Button className="premium-button">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Enter Reading
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+              
+              {/* Correctness Verification Display */}
+              <div className="text-xs font-medium text-foreground-tertiary flex items-center gap-2 px-1">
+                <span className="bg-background-card px-2 py-0.5 rounded-full border border-border/30">
+                  Last Month: {stats.prevMonthFull.usage_kwh} kWh · Rs {stats.prevMonthFull.cost_pkr.toLocaleString()}
+                </span>
               </div>
             </div>
 

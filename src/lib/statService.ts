@@ -217,6 +217,14 @@ export async function computeStatsBundle(userId: string, meterId?: string): Prom
     const baseWhere: any = { userId }
     if (meterId) baseWhere.meterId = meterId
 
+    // Data quality assessment
+    const dataQuality: DataQuality = {
+      warnings: [],
+      gaps: [],
+      duplicates: 0,
+      outliers: 0
+    }
+
     // Fetch current month readings (MTD)
     const mtdReadings = await prisma.meterReading.findMany({
       where: {
@@ -251,12 +259,32 @@ export async function computeStatsBundle(userId: string, meterId?: string): Prom
 
     // Aggregate data
     const mtdAgg = aggregateReadings(mtdReadings, window)
-    const prevMonthFullAgg = aggregateReadings(prevMonthReadings, { ...window, daysInMonth: 31 }) // Simplified
+    
+    // Correct Previous Month Usage Calculation: lastReading.value - firstReading.value
+    let prevMonthUsage = 0
+    let prevMonthCost = 0
+    if (prevMonthReadings.length >= 2) {
+      const firstReading = prevMonthReadings[0]
+      const lastReading = prevMonthReadings[prevMonthReadings.length - 1]
+      prevMonthUsage = (lastReading.reading || 0) - (firstReading.reading || 0)
+      
+      if (prevMonthUsage < 0) {
+        dataQuality.warnings.push(`Invalid previous month data: Negative usage detected (${prevMonthUsage} kWh)`)
+        prevMonthUsage = 0
+      } else {
+        // Use TariffEngine exclusively for cost
+        prevMonthCost = tariffEngine(prevMonthUsage).totalCost
+      }
+    } else if (prevMonthReadings.length > 0) {
+      dataQuality.warnings.push('Insufficient data for previous month (need at least 2 readings)')
+    }
+
+    const prevMonthFullAgg = { totalUsage: prevMonthUsage, totalCost: prevMonthCost }
     const prevMonthSamePeriodAgg = aggregateReadings(prevMonthSamePeriodReadings, window)
 
     // Recalculate costs using tariff engine for accuracy
     const mtdCostAccurate = mtdAgg.totalUsage > 0 ? tariffEngine(mtdAgg.totalUsage).totalCost : 0
-    const prevMonthFullCostAccurate = prevMonthFullAgg.totalUsage > 0 ? tariffEngine(prevMonthFullAgg.totalUsage).totalCost : 0
+    const prevMonthFullCostAccurate = prevMonthCost
     const prevMonthSamePeriodCostAccurate = prevMonthSamePeriodAgg.totalUsage > 0 ? tariffEngine(prevMonthSamePeriodAgg.totalUsage).totalCost : 0
 
     // Calculate efficiency scores
@@ -280,7 +308,7 @@ export async function computeStatsBundle(userId: string, meterId?: string): Prom
         window.daysElapsed,
         window.daysInMonth,
         mtdAgg.profile,
-        prevMonthFullAgg.profile
+        [] // Removed last month profile for simplicity as per requirements
       )
       forecastResult = { ...fr }
     }
@@ -290,19 +318,6 @@ export async function computeStatsBundle(userId: string, meterId?: string): Prom
     // Budget calculations
     const monthlyBudget = getBudgetFromStorage()
     const proratedBudget = monthlyBudget ? (monthlyBudget * window.daysElapsed) / window.daysInMonth : 0
-
-    // Forecast vs Predicted Status
-    const forecastDelta = monthlyBudget ? forecastCost - monthlyBudget : 0
-    let forecastStatus: 'below_forecast' | 'on_track' | 'exceeded' = 'on_track'
-    let forecastColor: 'green' | 'yellow' | 'red' = 'green'
-
-    if (forecastDelta < -500) {
-      forecastStatus = 'below_forecast'
-      forecastColor = 'green'
-    } else if (forecastDelta > 500) {
-      forecastStatus = 'exceeded'
-      forecastColor = 'red'
-    }
 
     // Budget Status
     let budgetStatusStr: BudgetMetrics['status'] = 'On Track'
@@ -333,14 +348,6 @@ export async function computeStatsBundle(userId: string, meterId?: string): Prom
       current_usage_mtd_kwh: mtdAgg.totalUsage,
       projected_cost_pkr: forecastCost,
       potential_savings_pkr: forecastCost * 0.15 // 15% potential savings estimate
-    }
-
-    // Data quality assessment
-    const dataQuality: DataQuality = {
-      warnings: [],
-      gaps: [],
-      duplicates: 0,
-      outliers: 0
     }
 
     // Add warnings for data quality and budget alerts
@@ -405,6 +412,7 @@ export async function computeStatsBundle(userId: string, meterId?: string): Prom
     }
 
     // Log calculation for traceability
+    console.log(`[StatsService] PrevMonth Usage: ${prevMonthUsage} kWh, Cost: Rs ${prevMonthCost}`)
     console.log(`[StatsService] ${calcId}: MTD=${mtdAgg.totalUsage}kWh/Rs${mtdCostAccurate}, Forecast=${forecastResult.usage}kWh/Rs${forecastCost}, Method=${forecastResult.method}`)
 
     return statsBundle

@@ -1,0 +1,61 @@
+You are working on the Volt (EnergizeWeb) codebase.
+
+Goal:
+Audit, correct, and expose accurate Previous Month (Full Month) usage and cost.
+This data is a hard dependency for forecasting, budgeting, and dashboard stability.
+
+Context:
+Forecasting logic relies on previous month data as the baseline.
+If previous month usage or cost is incorrect or missing, early-month forecasts become unreliable.
+
+Tasks:
+
+1. Data Fetch Verification
+   - Review how previous month readings are fetched in `computeStatsBundle`.
+   - Ensure readings are filtered using correct month/year boundaries.
+   - Do NOT assume 31 days. Use actual calendar dates.
+
+2. Correct Usage Aggregation (Critical)
+   - Previous month usage must be calculated as:
+     lastReading.value - firstReading.value
+   - Do NOT sum readings.
+   - If fewer than 2 readings exist:
+     • Flag a data quality warning
+     • Do NOT fabricate usage
+
+3. Cost Calculation
+   - Use TariffEngine exclusively to compute previous month cost
+   - Ensure slab-based non-linear pricing is applied correctly
+
+4. Validation & Guardrails
+   - If previous month usage ≤ 0:
+     • Mark data as invalid
+     • Add a warning in `data_quality.warnings`
+   - Ensure no NaN or null values propagate into StatsBundle
+
+5. StatsBundle Exposure
+   - Ensure these fields are always populated when data exists:
+     statsBundle.prevMonthFull.usage_kwh
+     statsBundle.prevMonthFull.cost_pkr
+   - These values must be consistent with meter readings and tariff logic
+
+6. Minimal Display for Verification
+   - Add a small, non-intrusive display on the Dashboard:
+     “Last Month: {usage_kwh} kWh · Rs {cost_pkr}”
+   - This is for correctness verification, not analytics
+
+7. Logging (Development Only)
+   - Add a clear console log:
+     [StatsService] PrevMonth Usage: X kWh, Cost: Rs Y
+   - This helps validate correctness during development
+
+Constraints:
+- Do NOT change database schema
+- Do NOT add mock data
+- Do NOT modify forecasting logic yet
+- Reuse existing aggregation and tariff utilities where possible
+
+Success Criteria:
+- Previous month usage and cost are correct, stable, and visible
+- Forecasting can safely rely on this data
+- Dashboard no longer shows zeros or blank values for previous month

@@ -195,33 +195,10 @@ function forecastUsage(
   }
 
   // Calculate daily average from actual readings
-  // If we have readings, use the average per day elapsed
-  const dailyAverage = mtdUsage / daysElapsed;
-  const projectedUsage = dailyAverage * daysInMonth;
+  // If we have readings, use the average per day elapsed (mtdUsage / daysElapsed) * 30
+  // Ensuring we use exactly the proportional logic requested (total / elapsed * 30)
+  const projectedUsage = (mtdUsage / daysElapsed) * daysInMonth;
 
-  if (daysElapsed < 3 && lastMonthProfile && lastMonthProfile.length > 0) {
-    // Method C: Blend with last month's profile for better early-month accuracy
-    const lastMonthAvgDaily = lastMonthProfile.reduce((sum, day) => sum + day.usage, 0) / lastMonthProfile.length
-    const blendedDaily = (dailyAverage + lastMonthAvgDaily) / 2
-    
-    return {
-      usage: blendedDaily * daysInMonth,
-      method: 'last_month_blend'
-    }
-  }
-
-  if (mtdProfile.length >= 7) {
-    // Method B: Profile-based scaling
-    const avgDailyFromProfile = mtdProfile.reduce((sum, day) => sum + day.usage, 0) / mtdProfile.length
-    const scaledUsage = avgDailyFromProfile * daysInMonth
-    
-    return {
-      usage: scaledUsage,
-      method: 'profile_scaled'
-    }
-  }
-
-  // Method A: Simple proportional based on daily average
   return {
     usage: projectedUsage,
     method: 'proportional'

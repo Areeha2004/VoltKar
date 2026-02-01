@@ -127,15 +127,15 @@ const AnalyticsPage: React.FC = () => {
     target: 60 // Example target
   })) || []
 
-  const forecastChartData = forecastData ? [
-    { scenario: 'Low', usage: forecastData.forecast.usage.low, cost: forecastData.forecast.bill.low },
-    { scenario: 'Expected', usage: forecastData.forecast.usage.expected, cost: forecastData.forecast.bill.expected },
-    { scenario: 'High', usage: forecastData.forecast.usage.high, cost: forecastData.forecast.bill.high }
+  const forecastChartData = forecastData?.forecast ? [
+    { scenario: 'Low', usage: forecastData.forecast.usage?.low ?? 0, cost: forecastData.forecast.bill?.low ?? 0 },
+    { scenario: 'Expected', usage: forecastData.forecast.usage?.expected ?? 0, cost: forecastData.forecast.bill?.expected ?? 0 },
+    { scenario: 'High', usage: forecastData.forecast.usage?.high ?? 0, cost: forecastData.forecast.bill?.high ?? 0 }
   ] : []
 
   const slabDistributionData = costData?.costs ? [
-    { name: 'MTD Usage', value: costData.breakdown.totalUsage, cost: costData.costs.actualToDateCost, color: '#3b82f6' },
-    { name: 'Remaining Projected', value: Math.max(0, costData.breakdown.projectedUsage - costData.breakdown.totalUsage), cost: Math.max(0, costData.costs.projectedCost - costData.costs.actualToDateCost), color: '#8b5cf6' },
+    { name: 'MTD Usage', value: costData.breakdown?.totalUsage ?? 0, cost: costData.costs?.actualToDateCost ?? 0, color: '#3b82f6' },
+    { name: 'Remaining Projected', value: Math.max(0, (costData.breakdown?.projectedUsage ?? 0) - (costData.breakdown?.totalUsage ?? 0)), cost: Math.max(0, (costData.costs?.projectedCost ?? 0) - (costData.costs?.actualToDateCost ?? 0)), color: '#8b5cf6' },
   ].filter(item => item.value > 0) : []
 
   const getAnomalySeverityColor = (severity: string) => {

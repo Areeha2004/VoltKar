@@ -216,7 +216,7 @@ const Dashboard: React.FC = () => {
                           budget.status === 'Over Budget' ? 'bg-red-500' :
                           budget.status === 'At Risk' ? 'bg-amber-500' : 'bg-primary'
                         }`}
-                        style={{ width: `${Math.min(100, (forecast.cost_pkr / (monthlyBudget || 1)) * 100)}%` }}
+                        style={{ width: `${Math.min(100, (mtd.cost_pkr / (monthlyBudget || 1)) * 100)}%` }}
                       />
                     </div>
                   </div>

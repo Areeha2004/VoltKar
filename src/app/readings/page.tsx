@@ -260,7 +260,7 @@ const ReadingEntryPage: React.FC = () => {
                 { 
                   title: 'Last Reading', 
                   value: recentReadings.length > 0 ? 
-                    Math.ceil((Date.now() - new Date(recentReadings[0].createdAt).getTime()) / (1000 * 60 * 60 * 24)).toString() : 
+                    Math.ceil((Date.now() - new Date(recentReadings[0].date).getTime()) / (1000 * 60 * 60 * 24)).toString() : 
                     'No',
                   unit: recentReadings.length > 0 ? 'days ago' : 'readings',
                   icon: Clock, 

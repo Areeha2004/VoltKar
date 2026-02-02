@@ -7,7 +7,7 @@ interface Reading {
   reading: number
   month: number
   year: number
-  createdAt: string
+  date: string
   meter: {
     id: string
     label: string

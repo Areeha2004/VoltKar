@@ -220,12 +220,32 @@ function forecastUsage(
 }
 
 /**
+ * Date Range Helpers for Strict Month Separation
+ */
+function getCurrentMonthRange(window: TimeWindow) {
+  const startDate = new Date(window.monthStart)
+  const endDate = new Date(window.monthStart.getFullYear(), window.monthStart.getMonth() + 1, 0, 23, 59, 59, 999)
+  return { startDate, endDate }
+}
+
+function getPreviousMonthRange(window: TimeWindow) {
+  const prevMonth = window.monthStart.getMonth() === 0 ? 11 : window.monthStart.getMonth() - 1
+  const prevYear = window.monthStart.getMonth() === 0 ? window.monthStart.getFullYear() - 1 : window.monthStart.getFullYear()
+  const startDate = new Date(prevYear, prevMonth, 1)
+  const endDate = new Date(prevYear, prevMonth + 1, 0, 23, 59, 59, 999)
+  return { startDate, endDate }
+}
+
+/**
  * Main function to compute comprehensive stats bundle
  */
 export async function computeStatsBundle(userId: string, meterId?: string): Promise<StatsBundle> {
   const calcId = `calc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
   const window = getCurrentTimeWindow()
   
+  const currentRange = getCurrentMonthRange(window)
+  const prevRange = getPreviousMonthRange(window)
+
   try {
     // Build query conditions
     const baseWhere: any = { userId }
@@ -239,12 +259,14 @@ export async function computeStatsBundle(userId: string, meterId?: string): Prom
       outliers: 0
     }
 
-    // Fetch current month readings (MTD)
+    // Fetch current month readings (MTD) - Strictly using range
     const mtdReadings = await prisma.meterReading.findMany({
       where: {
         ...baseWhere,
-        month: window.monthStart.getMonth() + 1,
-        year: window.monthStart.getFullYear()
+        date: {
+          gte: currentRange.startDate,
+          lte: currentRange.endDate
+        }
       },
       include: {
         meter: { select: { id: true, label: true, type: true } }
@@ -252,17 +274,27 @@ export async function computeStatsBundle(userId: string, meterId?: string): Prom
       orderBy: { date: 'asc' }
     })
 
-    // Fetch previous month readings (full)
-    const prevMonth = window.monthStart.getMonth() === 0 ? 12 : window.monthStart.getMonth()
-    const prevYear = window.monthStart.getMonth() === 0 ? window.monthStart.getFullYear() - 1 : window.monthStart.getFullYear()
-    
+    // Fetch previous month readings (full) - Strictly using range
     const prevMonthReadings = await prisma.meterReading.findMany({
       where: {
         ...baseWhere,
-        month: prevMonth,
-        year: prevYear
+        date: {
+          gte: prevRange.startDate,
+          lte: prevRange.endDate
+        }
       },
       orderBy: { date: 'asc' }
+    })
+
+    // Fetch the very last reading BEFORE this month (bridge reading)
+    const bridgeReading = await prisma.meterReading.findFirst({
+      where: {
+        ...baseWhere,
+        date: {
+          lt: currentRange.startDate
+        }
+      },
+      orderBy: { date: 'desc' }
     })
 
     // Fetch previous month same period (for MTD comparison)
@@ -274,32 +306,47 @@ export async function computeStatsBundle(userId: string, meterId?: string): Prom
     // Aggregate data
     const mtdAgg = aggregateReadings(mtdReadings, window)
     
-    // Correct Previous Month Usage Calculation: lastReading.value - firstReading.value
+    // Correct Cumulative Usage Calculation
+    // Previous Month: last - first within that month
     let prevMonthUsage = 0
     let prevMonthCost = 0
     if (prevMonthReadings.length >= 2) {
       const firstReading = prevMonthReadings[0]
       const lastReading = prevMonthReadings[prevMonthReadings.length - 1]
       prevMonthUsage = (lastReading.reading || 0) - (firstReading.reading || 0)
-      
-      if (prevMonthUsage < 0) {
-        dataQuality.warnings.push(`Invalid previous month data: Negative usage detected (${prevMonthUsage} kWh)`)
-        prevMonthUsage = 0
-      } else {
-        // Use TariffEngine exclusively for cost
-        prevMonthCost = tariffEngine(prevMonthUsage).totalCost
-      }
-    } else if (prevMonthReadings.length > 0) {
-      dataQuality.warnings.push('Insufficient data for previous month (need at least 2 readings)')
+    }
+
+    // Current MTD: latest of this month - last of previous month (or first of this month)
+    let mtdUsageCumulative = 0
+    if (mtdReadings.length > 0) {
+      const latestReading = mtdReadings[mtdReadings.length - 1]
+      const baselineReading = bridgeReading || mtdReadings[0]
+      mtdUsageCumulative = (latestReading.reading || 0) - (baselineReading.reading || 0)
+    }
+    
+    if (prevMonthUsage < 0) {
+      dataQuality.warnings.push(`Invalid previous month data: Negative usage detected (${prevMonthUsage} kWh)`)
+      prevMonthUsage = 0
+    } else {
+      prevMonthCost = tariffEngine(prevMonthUsage).totalCost
+    }
+
+    if (mtdUsageCumulative < 0) {
+      dataQuality.warnings.push(`Invalid MTD data: Negative usage detected (${mtdUsageCumulative} kWh)`)
+      mtdUsageCumulative = 0
     }
 
     const prevMonthFullAgg = { totalUsage: prevMonthUsage, totalCost: prevMonthCost }
     const prevMonthSamePeriodAgg = aggregateReadings(prevMonthSamePeriodReadings, window)
 
     // Recalculate costs using tariff engine for accuracy
-    const mtdCostAccurate = mtdAgg.totalUsage > 0 ? tariffEngine(mtdAgg.totalUsage).totalCost : 0
+    const mtdCostAccurate = mtdUsageCumulative > 0 ? tariffEngine(mtdUsageCumulative).totalCost : 0
     const prevMonthFullCostAccurate = prevMonthCost
     const prevMonthSamePeriodCostAccurate = prevMonthSamePeriodAgg.totalUsage > 0 ? tariffEngine(prevMonthSamePeriodAgg.totalUsage).totalCost : 0
+
+    // Update mtdAgg values for downstream logic
+    mtdAgg.totalUsage = mtdUsageCumulative
+    mtdAgg.totalCost = mtdCostAccurate
 
     // Calculate efficiency scores
     const mtdEfficiency = calculateEfficiencyScore(mtdAgg.totalUsage, prevMonthSamePeriodAgg.totalUsage)

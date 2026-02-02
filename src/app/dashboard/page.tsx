@@ -81,12 +81,10 @@ const Dashboard: React.FC = () => {
   const isMonthEnd = timeWindow.daysElapsed === timeWindow.daysInMonth;
   const progressPercent = (timeWindow.daysElapsed / timeWindow.daysInMonth) * 100;
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'Over Budget': return 'text-red-500 bg-red-500/10 border-red-500/20';
-      case 'At Risk': return 'text-amber-500 bg-amber-500/10 border-amber-500/20';
-      default: return 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20';
-    }
+    const getStatusColor = (status: string, val: number, target: number) => {
+    if (val > target) return 'text-red-500 bg-red-500/10 border-red-500/20';
+    if (val > target * 0.9) return 'text-amber-500 bg-amber-500/10 border-amber-500/20';
+    return 'text-emerald-500 bg-emerald-500/10 border-emerald-500/20';
   };
 
   return (
@@ -199,7 +197,7 @@ const Dashboard: React.FC = () => {
                     <Target className="h-5 w-5 text-primary" />
                     Budget Tracking
                   </h2>
-                  <div className={`px-3 py-1 rounded-full text-xs font-bold border ${getStatusColor(budget.status)}`}>
+                  <div className={`px-3 py-1 rounded-full text-xs font-bold border ${getStatusColor(budget.status, forecast.cost_pkr, monthlyBudget || 0)}`}>
                     {budget.status.toUpperCase()}
                   </div>
                 </div>

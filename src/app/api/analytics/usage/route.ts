@@ -14,21 +14,19 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const meterId = searchParams.get('meterId')
 
-    const [timeSeries, stats] = await Promise.all([
-      getAnalyticsTimeSeries(session.user.id, meterId || undefined),
-      computeStatsBundle(session.user.id, meterId || undefined)
-    ])
+    const stats = await computeStatsBundle(session.user.id, meterId || undefined)
+    const timeSeries = await getAnalyticsTimeSeries(session.user.id, meterId || undefined)
 
     return NextResponse.json({
       success: true,
       data: {
-        monthToDateUsage: stats.mtd.usage_kwh,
-        monthToDateCost: stats.mtd.cost_pkr,
-        averageDailyUsage: Math.round((stats.mtd.usage_kwh / stats.window.daysElapsed) * 100) / 100,
+        mtd: stats.mtd,
+        forecast: stats.forecast,
+        prevMonthFull: stats.prevMonthFull,
+        window: stats.window,
         weeklyBreakdown: timeSeries.weeklyBreakdown,
         dailyUsage: timeSeries.dailyUsage,
-        budgetProgress: timeSeries.budgetProgress,
-        window: stats.window
+        budgetProgress: timeSeries.budgetProgress
       }
     })
 

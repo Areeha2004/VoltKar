@@ -279,3 +279,83 @@ export async function computeStatsBundle(userId: string, meterId?: string): Prom
     calcId
   }
 }
+
+/**
+ * Get analytics time series data for charts
+ */
+export async function getAnalyticsTimeSeries(userId: string, meterId?: string): Promise<{
+  dailyUsage: Array<{ date: string; usage: number; cost: number }>
+  weeklyBreakdown: Array<{ week: number; usage: number; cost: number }>
+  budgetProgress: Array<{ day: number; spent: number; budget: number }>
+}> {
+  const window = getCurrentTimeWindow()
+  const baseWhere: any = { userId }
+  if (meterId) baseWhere.meterId = meterId
+
+  const readings = await prisma.meterReading.findMany({
+    where: {
+      ...baseWhere,
+      date: {
+        gte: window.monthStart,
+        lte: new Date(window.monthStart.getFullYear(), window.monthStart.getMonth() + 1, 0, 23, 59, 59, 999)
+      }
+    },
+    orderBy: { date: 'asc' }
+  })
+
+  // Daily usage series
+  const dailyUsageMap = new Map<string, { usage: number; cost: number }>()
+  readings.forEach(reading => {
+    const date = new Date(reading.date).toISOString().split('T')[0]
+    const existing = dailyUsageMap.get(date) || { usage: 0, cost: 0 }
+    dailyUsageMap.set(date, {
+      usage: existing.usage + (reading.usage || 0),
+      cost: existing.cost + (reading.estimatedCost || 0)
+    })
+  })
+
+  const dailySeries = Array.from(dailyUsageMap.entries()).map(([date, data]) => ({
+    date,
+    usage: Math.round(data.usage * 100) / 100,
+    cost: Math.round(data.cost * 100) / 100
+  }))
+
+  // Weekly breakdown
+  const weeklyBreakdown = []
+  for (let week = 1; week <= 5; week++) {
+    const weekReadings = readings.filter(r => r.week === week)
+    const weekUsage = weekReadings.reduce((sum, r) => sum + (r.usage || 0), 0)
+    const weekCost = weekReadings.reduce((sum, r) => sum + (r.estimatedCost || 0), 0)
+    
+    weeklyBreakdown.push({
+      week,
+      usage: Math.round(weekUsage * 100) / 100,
+      cost: Math.round(weekCost * 100) / 100
+    })
+  }
+
+  // Budget progress
+  const monthlyBudget = getBudgetFromStorage()
+  const budgetProgress = []
+  
+  if (monthlyBudget) {
+    let cumulativeCost = 0
+    for (let day = 1; day <= window.daysElapsed; day++) {
+      const dayReadings = readings.filter(r => new Date(r.date).getDate() === day)
+      const dayCost = dayReadings.reduce((sum, r) => sum + (r.estimatedCost || 0), 0)
+      cumulativeCost += dayCost
+      
+      budgetProgress.push({
+        day,
+        spent: Math.round(cumulativeCost * 100) / 100,
+        budget: Math.round((monthlyBudget * day) / window.daysInMonth * 100) / 100
+      })
+    }
+  }
+
+  return {
+    dailyUsage: dailySeries,
+    weeklyBreakdown,
+    budgetProgress
+  }
+}

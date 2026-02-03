@@ -58,7 +58,9 @@ const AnalyticsPage: React.FC = () => {
       setUsageData({
         monthToDateUsage: usage.data.mtd.usage_kwh,
         monthToDateCost: usage.data.mtd.cost_pkr,
-        weeklyBreakdown: usage.data.mtd.weeklyBreakdown // If available, else we keep the structure
+        weeklyBreakdown: usage.data.weeklyBreakdown,
+        prevMonthUsage: usage.data.prevMonthFull.usage_kwh,
+        prevMonthCost: usage.data.prevMonthFull.cost_pkr
       })
     }
 
@@ -235,7 +237,7 @@ const AnalyticsPage: React.FC = () => {
                   title: 'MTD Usage',
                   value: usageData?.monthToDateUsage || 0,
                   unit: 'kWh',
-                  change: comparisonData?.comparisons?.[0]?.percentageChange?.usage || 0,
+                  change: usageData?.prevMonthUsage > 0 ? Math.round(((usageData.monthToDateUsage - usageData.prevMonthUsage) / usageData.prevMonthUsage) * 100) : 0,
                   icon: Zap,
                   gradient: 'from-primary to-accent-cyan'
                 },
@@ -243,7 +245,7 @@ const AnalyticsPage: React.FC = () => {
                   title: 'MTD Cost',
                   value: Math.round(usageData?.monthToDateCost || 0),
                   unit: 'PKR',
-                  change: comparisonData?.comparisons?.[0]?.percentageChange?.cost || 0,
+                  change: usageData?.prevMonthCost > 0 ? Math.round(((usageData.monthToDateCost - usageData.prevMonthCost) / usageData.prevMonthCost) * 100) : 0,
                   icon: DollarSign,
                   gradient: 'from-accent-blue to-accent-purple'
                 },
@@ -257,7 +259,7 @@ const AnalyticsPage: React.FC = () => {
                 },
                 {
                   title: 'Efficiency Score',
-                  value: 87,
+                  value: Math.round(87), // Defaulting to 87 for now
                   unit: '%',
                   change: 12,
                   icon: Target,

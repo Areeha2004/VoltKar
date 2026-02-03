@@ -1,146 +1,170 @@
-// Tariff Engine - Central cost calculation function
+
+// ================================
+// TARIFF ENGINE — FINAL STABLE
+// ================================
+
 export interface TariffSlab {
-  min: number
-  max: number
+  upTo: number | null   // null = infinity
   rate: number
 }
 
 export interface TariffConfig {
   slabs: TariffSlab[]
-  fuelAdj: number
+  fuelAdjPerUnit: number
   fixedCharges: number
   taxPercent: number
   tvFee: number
 }
 
 export interface CostBreakdown {
-  baseCost: number
-  fpaAmount: number
+  units: number
+  energyCost: number
+  fuelAdj: number
   fixedCharges: number
   subtotal: number
-  gstAmount: number
+  tax: number
   tvFee: number
   totalCost: number
-  slabBreakdown: Array<{
-    slab: string
+  slabBreakdown: {
+    range: string
     units: number
     rate: number
     cost: number
-  }>
+  }[]
 }
 
-// Default LESCO tariff structure (dummy data)
+/**
+ * 🇵🇰 Simplified & realistic LESCO-style slabs
+ * Incremental billing (correct)
+ */
 export const DEFAULT_TARIFF: TariffConfig = {
   slabs: [
-    { min: 0, max: 50, rate: 3.95 },
-    { min: 51, max: 100, rate: 7.74 },
-    { min: 101, max: 200, rate: 10.06 },
-    { min: 201, max: 300, rate: 18.15 },
-    { min: 301, max: 700, rate: 22.71 },
-    { min: 701, max: Infinity, rate: 28.30 }
+    { upTo: 50, rate: 3.95 },
+    { upTo: 100, rate: 7.74 },
+    { upTo: 200, rate: 10.06 },
+    { upTo: 300, rate: 18.15 },
+    { upTo: 700, rate: 22.71 },
+    { upTo: null, rate: 28.30 }
   ],
-  fuelAdj: 4.77,
+  fuelAdjPerUnit: 4.77,
   fixedCharges: 200,
   taxPercent: 17,
   tvFee: 35
 }
 
 /**
- * Central tariff engine for cost calculations
- * @param units - kWh consumed
- * @param tariff - Tariff configuration (optional, uses default if not provided)
- * @returns Detailed cost breakdown
+ * 🚨 STRICT RULE:
+ * Accepts ONLY usage (Δ kWh)
  */
-export function tariffEngine(units: number, tariff: TariffConfig = DEFAULT_TARIFF): CostBreakdown {
-  if (units <= 0) {
+export function tariffEngine(
+  usageKwh: number,
+  tariff: TariffConfig = DEFAULT_TARIFF
+): CostBreakdown {
+
+  if (!Number.isFinite(usageKwh) || usageKwh <= 0) {
     return {
-      baseCost: 0,
-      fpaAmount: 0,
+      units: 0,
+      energyCost: 0,
+      fuelAdj: 0,
       fixedCharges: 0,
       subtotal: 0,
-      gstAmount: 0,
+      tax: 0,
       tvFee: 0,
       totalCost: 0,
       slabBreakdown: []
     }
   }
 
-  const slabBreakdown: CostBreakdown['slabBreakdown'] = []
-  let baseCost = 0
-  let remainingUnits = units
-
-  // Calculate cost for each slab
-  for (const slab of tariff.slabs) {
-    if (remainingUnits <= 0) break
-
-    const slabUnits = Math.min(remainingUnits, slab.max - slab.min + 1)
-    const slabCost = slabUnits * slab.rate
-
-    baseCost += slabCost
-    slabBreakdown.push({
-      slab: slab.max === Infinity ? `${slab.min}+` : `${slab.min}-${slab.max}`,
-      units: slabUnits,
-      rate: slab.rate,
-      cost: slabCost
-    })
-
-    remainingUnits -= slabUnits
+  // Guardrail — accidental meter reading
+  if (usageKwh > 3000) {
+    console.warn(
+      "[TariffEngine] ⚠️ Suspicious usage:",
+      usageKwh,
+      "Did you pass a meter reading instead of usage?"
+    )
   }
 
-  // Calculate additional charges
-  const fpaAmount = units * tariff.fuelAdj
-  const subtotal = baseCost + fpaAmount + tariff.fixedCharges
-  const gstAmount = subtotal * (tariff.taxPercent / 100)
-  const totalCost = subtotal + gstAmount + tariff.tvFee
+  let remaining = usageKwh
+  let lastLimit = 0
+  let energyCost = 0
+  const slabBreakdown: CostBreakdown["slabBreakdown"] = []
+
+  for (const slab of tariff.slabs) {
+    if (remaining <= 0) break
+
+    const slabCap =
+      slab.upTo === null
+        ? remaining
+        : slab.upTo - lastLimit
+
+    const slabUnits = Math.min(remaining, slabCap)
+    const slabCost = slabUnits * slab.rate
+
+    energyCost += slabCost
+    slabBreakdown.push({
+      range:
+        slab.upTo === null
+          ? `${lastLimit + 1}+`
+          : `${lastLimit + 1}-${slab.upTo}`,
+      units: slabUnits,
+      rate: slab.rate,
+      cost: Math.round(slabCost * 100) / 100
+    })
+
+    remaining -= slabUnits
+    lastLimit = slab.upTo ?? lastLimit
+  }
+
+  const fuelAdj = usageKwh * tariff.fuelAdjPerUnit
+  const subtotal = energyCost + fuelAdj + tariff.fixedCharges
+  const tax = subtotal * (tariff.taxPercent / 100)
+  const totalCost = subtotal + tax + tariff.tvFee
 
   return {
-    baseCost: Math.round(baseCost * 100) / 100,
-    fpaAmount: Math.round(fpaAmount * 100) / 100,
+    units: Math.round(usageKwh * 100) / 100,
+    energyCost: Math.round(energyCost * 100) / 100,
+    fuelAdj: Math.round(fuelAdj * 100) / 100,
     fixedCharges: tariff.fixedCharges,
     subtotal: Math.round(subtotal * 100) / 100,
-    gstAmount: Math.round(gstAmount * 100) / 100,
+    tax: Math.round(tax * 100) / 100,
     tvFee: tariff.tvFee,
     totalCost: Math.round(totalCost * 100) / 100,
     slabBreakdown
   }
 }
+export function getSlabWarningMessage(
+  usage: number,
+  tariff: TariffConfig = DEFAULT_TARIFF
+): string | null {
 
-/**
- * Get current slab information for given units
- */
-export function getCurrentSlab(units: number, tariff: TariffConfig = DEFAULT_TARIFF): { slab: TariffSlab; index: number } | null {
+  let cumulative = 0
+
   for (let i = 0; i < tariff.slabs.length; i++) {
     const slab = tariff.slabs[i]
-    if (units >= slab.min && units <= slab.max) {
-      return { slab, index: i }
+    const slabLimit = slab.upTo ?? Infinity
+
+    if (usage <= slabLimit) {
+      const next = tariff.slabs[i + 1]
+      if (!next || next.upTo === null) return null
+
+      const unitsToNext = next.upTo - usage
+      if (unitsToNext > 0 && unitsToNext <= 20) {
+        return `⚠️ Only ${unitsToNext} units left before next slab (Rs ${next.rate}/unit)`
+      }
+      return null
     }
+
+    cumulative = slabLimit
   }
+
   return null
 }
-
-/**
- * Calculate usage difference between two readings
- */
-export function calculateUsage(currentReading: number, previousReading: number): number {
+export function calculateUsage(
+  currentReading: number,
+  previousReading: number
+): number {
+  if (!Number.isFinite(currentReading) || !Number.isFinite(previousReading)) {
+    return 0
+  }
   return Math.max(0, currentReading - previousReading)
-}
-
-/**
- * Get slab warning message
- */
-export function getSlabWarningMessage(units: number, tariff: TariffConfig = DEFAULT_TARIFF): string | null {
-  const currentSlabInfo = getCurrentSlab(units, tariff)
-  if (!currentSlabInfo) return null
-
-  const { slab: currentSlab, index: currentSlabIndex } = currentSlabInfo
-  const nextSlab = tariff.slabs[currentSlabIndex + 1]
-  
-  if (!nextSlab) return null
-
-  const unitsToNextSlab = nextSlab.min - units
-  if (unitsToNextSlab <= 20 && unitsToNextSlab > 0) {
-    return `Warning: You're ${unitsToNextSlab} units away from the next slab (Rs ${nextSlab.rate}/kWh). Consider reducing usage to save costs.`
-  }
-
-  return null
 }

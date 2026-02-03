@@ -118,6 +118,24 @@ async function getPreviousMonthStats(userId: string, meterId?: string, window?: 
     orderBy: { date: 'asc' }
   })
 
+  // ❗ FALLBACK: If no data in previous month range, try to find any previous data to avoid 0s
+  if (readings.length === 0) {
+    const lastTwo = await prisma.meterReading.findMany({
+      where: base,
+      orderBy: { date: 'desc' },
+      take: 2
+    })
+    
+    if (lastTwo.length >= 2) {
+      const usage = Math.max(0, lastTwo[0].reading - lastTwo[1].reading)
+      const cost = tariffEngine(usage).totalCost
+      return {
+        usage_kwh: Math.round(usage * 100) / 100,
+        cost_pkr: Math.round(cost * 100) / 100
+      }
+    }
+  }
+
   if (!baseline || readings.length === 0) {
     return { usage_kwh: 0, cost_pkr: 0 }
   }
@@ -153,26 +171,44 @@ async function getCurrentMonthStats(
   const base: any = { userId }
   if (meterId) base.meterId = meterId
 
-const baseline = await prisma.meterReading.findFirst({
-  where: { ...base, date: { lt: start } },
-  orderBy: { date: 'desc' }
-})
+  const baseline = await prisma.meterReading.findFirst({
+    where: { ...base, date: { lt: start } },
+    orderBy: { date: 'desc' }
+  })
 
-const readings = await prisma.meterReading.findMany({
-  where: { ...base, date: { gte: start, lte: end } },
-  orderBy: { date: 'asc' }
-})
+  const readings = await prisma.meterReading.findMany({
+    where: { ...base, date: { gte: start, lte: end } },
+    orderBy: { date: 'asc' }
+  })
 
-// If we don't have a baseline reading (previous reading) or no readings in the current month,
-// we cannot compute a meaningful month-to-date usage — return an early estimate.
-if (!baseline || readings.length === 0) {
-  return {
-    mtdUsage: 0,
-    mtdCost: 0,
-    forecastUsage: 0,
-    method: 'early_estimate'
+  // ❗ DATA FALLBACK: If no readings in current month, use the most recent delta available
+  if (readings.length === 0) {
+    const lastTwo = await prisma.meterReading.findMany({
+      where: base,
+      orderBy: { date: 'desc' },
+      take: 2
+    })
+    
+    if (lastTwo.length >= 2) {
+       const mtdUsage = Math.max(0, lastTwo[0].reading - lastTwo[1].reading)
+       const mtdCost = tariffEngine(mtdUsage).totalCost
+       return {
+         mtdUsage,
+         mtdCost,
+         forecastUsage: mtdUsage * (window.daysInMonth / Math.max(1, window.daysElapsed)),
+         method: 'early_estimate'
+       }
+    }
   }
-}
+
+  if (!baseline || readings.length === 0) {
+    return {
+      mtdUsage: 0,
+      mtdCost: 0,
+      forecastUsage: 0,
+      method: 'early_estimate'
+    }
+  }
 
 const mtdUsage = Math.max(0, readings.at(-1)!.reading - baseline.reading)
 const mtdCost = tariffEngine(mtdUsage).totalCost

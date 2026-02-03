@@ -134,8 +134,8 @@ const AnalyticsPage: React.FC = () => {
   ] : []
 
   const slabDistributionData = costData?.costs ? [
-    { name: 'MTD Usage', value: costData.breakdown?.totalUsage ?? 0, cost: costData.costs?.actualToDateCost ?? 0, color: '#3b82f6' },
-    { name: 'Remaining Projected', value: Math.max(0, (costData.breakdown?.projectedUsage ?? 0) - (costData.breakdown?.totalUsage ?? 0)), cost: Math.max(0, (costData.costs?.projectedCost ?? 0) - (costData.costs?.actualToDateCost ?? 0)), color: '#8b5cf6' },
+    { name: 'MTD Usage', value: costData.breakdown?.totalUsage || usageData?.monthToDateUsage || 0, cost: costData.costs?.actualToDateCost || usageData?.monthToDateCost || 0, color: '#3b82f6' },
+    { name: 'Remaining Projected', value: Math.max(0, (costData.breakdown?.projectedUsage || 0) - (costData.breakdown?.totalUsage || 0)), cost: Math.max(0, (costData.costs?.projectedCost || 0) - (costData.costs?.actualToDateCost || 0)), color: '#8b5cf6' },
   ].filter(item => item.value > 0) : []
 
   const getAnomalySeverityColor = (severity: string) => {
@@ -248,7 +248,7 @@ const AnalyticsPage: React.FC = () => {
                 },
                 {
                   title: 'Forecast Bill',
-                  value: Math.round(forecastData?.forecast?.bill?.expected || 0),
+                  value: Math.round(forecastData?.forecast?.bill?.expected || usageData?.monthToDateCost || 0),
                   unit: 'PKR',
                   change: forecastData?.comparison?.vsLastMonth || 0,
                   icon: TrendingUp,

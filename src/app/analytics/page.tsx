@@ -55,9 +55,11 @@ const AnalyticsPage: React.FC = () => {
 
     if (usageRes.ok) {
       const usage = await usageRes.json()
-      setUsageData(usage.data)
-      // Forecast data is now embedded in stats bundle returned via usage/costs if we want
-      // But let's map it from costData for consistency
+      setUsageData({
+        monthToDateUsage: usage.data.mtd.usage_kwh,
+        monthToDateCost: usage.data.mtd.cost_pkr,
+        weeklyBreakdown: usage.data.mtd.weeklyBreakdown // If available, else we keep the structure
+      })
     }
 
     if (costRes.ok) {
@@ -65,12 +67,11 @@ const AnalyticsPage: React.FC = () => {
       setCostData(cost.data)
       setForecastData({
         forecast: {
-          usage: { expected: cost.data.breakdown.projectedUsage },
-          bill: { expected: cost.data.costs.projectedCost }
+          usage: { expected: cost.data.forecast.usage_kwh },
+          bill: { expected: cost.data.forecast.cost_pkr }
         },
-        comparison: { vsLastMonth: cost.data.comparison.vsLastMonth }
+        comparison: { vsLastMonth: cost.data.forecast.vs_prev_full.pct_cost }
       })
-      // setInsights(cost.data.insights || []) // Keep hardcoded as requested
     }
 
       if (metersRes.ok) {
@@ -133,9 +134,9 @@ const AnalyticsPage: React.FC = () => {
     { scenario: 'High', usage: forecastData.forecast.usage?.high ?? 0, cost: forecastData.forecast.bill?.high ?? 0 }
   ] : []
 
-  const slabDistributionData = costData?.costs ? [
-    { name: 'MTD Usage', value: costData.breakdown?.totalUsage || usageData?.monthToDateUsage || 0, cost: costData.costs?.actualToDateCost || usageData?.monthToDateCost || 0, color: '#3b82f6' },
-    { name: 'Remaining Projected', value: Math.max(0, (costData.breakdown?.projectedUsage || 0) - (costData.breakdown?.totalUsage || 0)), cost: Math.max(0, (costData.costs?.projectedCost || 0) - (costData.costs?.actualToDateCost || 0)), color: '#8b5cf6' },
+  const slabDistributionData = forecastData?.forecast ? [
+    { name: 'MTD Usage', value: usageData?.monthToDateUsage || 0, cost: usageData?.monthToDateCost || 0, color: '#3b82f6' },
+    { name: 'Remaining Projected', value: Math.max(0, (forecastData.forecast.usage?.expected || 0) - (usageData?.monthToDateUsage || 0)), cost: Math.max(0, (forecastData.forecast.bill?.expected || 0) - (usageData?.monthToDateCost || 0)), color: '#8b5cf6' },
   ].filter(item => item.value > 0) : []
 
   const getAnomalySeverityColor = (severity: string) => {

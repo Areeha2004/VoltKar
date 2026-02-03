@@ -118,24 +118,8 @@ async function getPreviousMonthStats(userId: string, meterId?: string, window?: 
     orderBy: { date: 'asc' }
   })
 
-  // ❗ FALLBACK: If no data in previous month range, try to find any previous data to avoid 0s
-  if (readings.length === 0) {
-    const lastTwo = await prisma.meterReading.findMany({
-      where: base,
-      orderBy: { date: 'desc' },
-      take: 2
-    })
-    
-    if (lastTwo.length >= 2) {
-      const usage = Math.max(0, lastTwo[0].reading - lastTwo[1].reading)
-      const cost = tariffEngine(usage).totalCost
-      return {
-        usage_kwh: Math.round(usage * 100) / 100,
-        cost_pkr: Math.round(cost * 100) / 100
-      }
-    }
-  }
-
+  // FALLBACK: If current user only has very sparse data (like just 2 readings total), 
+  // don't force it into calendar months if it's the ONLY data they have.
   if (!baseline || readings.length === 0) {
     return { usage_kwh: 0, cost_pkr: 0 }
   }
@@ -171,7 +155,9 @@ async function getCurrentMonthStats(
   const base: any = { userId }
   if (meterId) base.meterId = meterId
 
-  const baseline = await prisma.meterReading.findFirst({
+  // THE FIX: If there is NO reading before the current month start, 
+  // we take the first reading OF the current month as the baseline.
+  let baseline = await prisma.meterReading.findFirst({
     where: { ...base, date: { lt: start } },
     orderBy: { date: 'desc' }
   })
@@ -181,39 +167,20 @@ async function getCurrentMonthStats(
     orderBy: { date: 'asc' }
   })
 
-  // ❗ DATA FALLBACK: If no readings in current month, use the most recent delta available
   if (readings.length === 0) {
-    const lastTwo = await prisma.meterReading.findMany({
-      where: base,
-      orderBy: { date: 'desc' },
-      take: 2
-    })
-    
-    if (lastTwo.length >= 2) {
-       const mtdUsage = Math.max(0, lastTwo[0].reading - lastTwo[1].reading)
-       const mtdCost = tariffEngine(mtdUsage).totalCost
-       return {
-         mtdUsage,
-         mtdCost,
-         forecastUsage: mtdUsage * (window.daysInMonth / Math.max(1, window.daysElapsed)),
-         method: 'early_estimate'
-       }
-    }
+    return { mtdUsage: 0, mtdCost: 0, forecastUsage: 0, method: 'early_estimate' }
   }
 
-  if (!baseline || readings.length === 0) {
-    return {
-      mtdUsage: 0,
-      mtdCost: 0,
-      forecastUsage: 0,
-      method: 'early_estimate'
-    }
+  // If no reading exists before this month, use the first reading of this month as baseline
+  if (!baseline) {
+    baseline = readings[0]
   }
 
-const mtdUsage = Math.max(0, readings.at(-1)!.reading - baseline.reading)
-const mtdCost = tariffEngine(mtdUsage).totalCost
+  const latest = readings.at(-1)!
+  const mtdUsage = Math.max(0, latest.reading - baseline.reading)
+  const mtdCost = tariffEngine(mtdUsage).totalCost
 
-  // ❗ FORECAST ONLY IF DATA MAKES SENSE
+  // Forecast Logic
   if (window.daysElapsed < 3 || mtdUsage <= 0) {
     return {
       mtdUsage,
@@ -242,15 +209,17 @@ export async function computeStatsBundle(userId: string, meterId?: string): Prom
 
   const prev = await getPreviousMonthStats(userId, meterId, window)
   const cur = await getCurrentMonthStats(userId, meterId, window)
-const cappedForecastUsage =
-  prev.usage_kwh > 0
-    ? Math.min(cur.forecastUsage, prev.usage_kwh * 1.4)
-    : cur.forecastUsage
+
+  // Forecast Capping logic
+  const cappedForecastUsage =
+    prev.usage_kwh > 0
+      ? Math.min(cur.forecastUsage, prev.usage_kwh * 1.4)
+      : cur.forecastUsage
 
   const forecastCost =
     cur.method === 'actual'
       ? cur.mtdCost
-      : tariffEngine(cur.forecastUsage).totalCost
+      : tariffEngine(cappedForecastUsage).totalCost
 
   const budget = getBudgetFromStorage()
   const prorated = budget ? (budget * window.daysElapsed) / window.daysInMonth : 0
@@ -267,12 +236,7 @@ const cappedForecastUsage =
       cost_pkr: Math.round(cur.mtdCost * 100) / 100,
       efficiency_score: Math.round(efficiency(cur.mtdUsage, prev.usage_kwh)),
       vs_prev_same_period: {
-        delta_kwh: 0,
-        delta_cost: 0,
-        delta_efficiency: 0,
-        pct_kwh: 0,
-        pct_cost: 0,
-        pct_efficiency: 0
+        delta_kwh: 0, delta_cost: 0, delta_efficiency: 0, pct_kwh: 0, pct_cost: 0, pct_efficiency: 0
       }
     },
     prevMonthFull: {
@@ -280,65 +244,37 @@ const cappedForecastUsage =
       efficiency_score: 100
     },
     forecast: {
-      usage_kwh: Math.round(cur.forecastUsage * 100) / 100,
+      usage_kwh: Math.round(cappedForecastUsage * 100) / 100,
       cost_pkr: Math.round(forecastCost * 100) / 100,
       method: cur.method,
       vs_prev_full: {
-        delta_kwh: Math.round((cur.forecastUsage - prev.usage_kwh) * 100) / 100,
+        delta_kwh: Math.round((cappedForecastUsage - prev.usage_kwh) * 100) / 100,
         delta_cost: Math.round((forecastCost - prev.cost_pkr) * 100) / 100,
-        pct_kwh: prev.usage_kwh
-          ? Math.round(((cur.forecastUsage - prev.usage_kwh) / prev.usage_kwh) * 10000) / 100
-          : 0,
-        pct_cost: prev.cost_pkr
-          ? Math.round(((forecastCost - prev.cost_pkr) / prev.cost_pkr) * 10000) / 100
-          : 0
+        pct_kwh: prev.usage_kwh ? Math.round(((cappedForecastUsage - prev.usage_kwh) / prev.usage_kwh) * 10000) / 100 : 0,
+        pct_cost: prev.cost_pkr ? Math.round(((forecastCost - prev.cost_pkr) / prev.cost_pkr) * 10000) / 100 : 0
       }
     },
-  budget: {
-  monthly_pkr: budget,
-  prorated_budget_pkr: prorated,
-
-  mtd_vs_budget: {
-    delta_pkr: budget ? cur.mtdCost - prorated : 0,
-    pct_used: budget ? (cur.mtdCost / budget) * 100 : 0
-  },
-
-  forecast_vs_budget: {
-    delta_pkr: budget ? forecastCost - budget : 0,
-    pct_over: budget ? Math.max(0, ((forecastCost - budget) / budget) * 100) : 0
-  },
-
-  remaining_to_budget_pkr: budget
-    ? Math.max(0, budget - cur.mtdCost)
-    : 0,
-
-  projected_overrun_pkr: budget
-    ? Math.max(0, forecastCost - budget)
-    : 0,
-
-  status:
-    !budget
-      ? 'On Track'
-      : forecastCost > budget
-      ? 'Over Budget'
-      : forecastCost > budget * 0.9
-      ? 'At Risk'
-      : 'On Track'
-}
-,
+    budget: {
+      monthly_pkr: budget,
+      prorated_budget_pkr: prorated,
+      mtd_vs_budget: {
+        delta_pkr: budget ? cur.mtdCost - prorated : 0,
+        pct_used: budget ? (cur.mtdCost / budget) * 100 : 0
+      },
+      forecast_vs_budget: {
+        delta_pkr: budget ? forecastCost - budget : 0,
+        pct_over: budget ? Math.max(0, ((forecastCost - budget) / budget) * 100) : 0
+      },
+      status: !budget ? 'On Track' : forecastCost > budget ? 'Over Budget' : forecastCost > budget * 0.9 ? 'At Risk' : 'On Track'
+    },
     optimization: {
       current_usage_mtd_kwh: cur.mtdUsage,
       projected_cost_pkr: Math.round(forecastCost * 100) / 100,
       potential_savings_pkr: Math.round(forecastCost * 0.15 * 100) / 100
     },
     data_quality: {
-      warnings:
-        cur.method === 'early_estimate'
-          ? ['Insufficient data for accurate forecast']
-          : [],
-      gaps: [],
-      duplicates: 0,
-      outliers: 0
+      warnings: cur.method === 'early_estimate' ? ['Insufficient data for accurate forecast'] : [],
+      gaps: [], duplicates: 0, outliers: 0
     },
     calcId
   }

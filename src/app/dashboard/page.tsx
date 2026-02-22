@@ -68,6 +68,11 @@ const Dashboard: React.FC = () => {
     setMonthlyBudget(budget);
     window.location.reload();
   };
+const safeBudget = {
+  projected_overrun_pkr: 0,
+  remaining_to_budget_pkr: 0,
+  monthly_budget_pkr: 0,
+};
 
   if (loading || !stats) {
     return (
@@ -222,13 +227,13 @@ const Dashboard: React.FC = () => {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="p-4 rounded-2xl bg-background-card/50">
                       <p className="text-xs text-foreground-muted uppercase mb-1">Projected Overrun</p>
-                      <p className={`text-xl font-bold ${budget.projected_overrun_pkr > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
-                        Rs {budget.projected_overrun_pkr.toLocaleString()}
+                      <p className={`text-xl font-bold ${budget.projected_overrun_pkr ?? 0 > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                        Rs {budget.projected_overrun_pkr?.toLocaleString() ?? 0}
                       </p>
                     </div>
                     <div className="p-4 rounded-2xl bg-background-card/50">
                       <p className="text-xs text-foreground-muted uppercase mb-1">Remaining Budget</p>
-                      <p className="text-xl font-bold">Rs {budget.remaining_to_budget_pkr.toLocaleString()}</p>
+                      <p className="text-xl font-bold">Rs {budget.remaining_to_budget_pkr?.toLocaleString() ?? 0}</p>
                     </div>
                   </div>
                 </div>

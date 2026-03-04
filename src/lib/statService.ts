@@ -177,8 +177,15 @@ async function computeMeterUsageInRange(
 
   const baselineReading = baseline?.reading ?? readings[0].reading
   const latestReadingEntry = readings[readings.length - 1]
-  const latestReading = latestReadingEntry.reading
-  const usage = Math.max(0, latestReading - baselineReading)
+  let usage = 0
+  let previousReading = baselineReading
+
+  // Sum positive deltas between consecutive readings so meter resets/rollovers
+  // don't collapse month usage to zero.
+  for (const readingEntry of readings) {
+    usage += Math.max(0, readingEntry.reading - previousReading)
+    previousReading = readingEntry.reading
+  }
 
   return {
     usage,

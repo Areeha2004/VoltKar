@@ -43,6 +43,11 @@ export async function PUT(
     if (Number.isNaN(nextDate.getTime())) {
       return NextResponse.json({ error: 'Invalid date' }, { status: 400 })
     }
+    const endOfToday = new Date()
+    endOfToday.setHours(23, 59, 59, 999)
+    if (nextDate > endOfToday) {
+      return NextResponse.json({ error: 'Future dates are not allowed for meter readings' }, { status: 400 })
+    }
 
     // Prevent duplicate slot after update
     const duplicate = await prisma.meterReading.findFirst({

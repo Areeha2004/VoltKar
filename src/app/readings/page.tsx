@@ -170,6 +170,18 @@ const ReadingEntryPage: React.FC = () => {
       return
     }
 
+    const readingDate = new Date(date)
+    if (Number.isNaN(readingDate.getTime())) {
+      setSubmitError('Please provide a valid reading date.')
+      return
+    }
+    const endOfToday = new Date()
+    endOfToday.setHours(23, 59, 59, 999)
+    if (readingDate > endOfToday) {
+      setSubmitError('Future dates are not allowed for meter readings.')
+      return
+    }
+
     if (selectedMeterData && numericReading < Number(selectedMeterData.lastReading || 0)) {
       setSubmitError('Current reading cannot be lower than the previous meter reading.')
       return
@@ -178,7 +190,6 @@ const ReadingEntryPage: React.FC = () => {
     try {
       setSubmitting(true)
 
-      const readingDate = new Date(date)
       const month = readingDate.getMonth() + 1
       const year = readingDate.getFullYear()
 
@@ -382,6 +393,7 @@ const ReadingEntryPage: React.FC = () => {
                         label="Reading Date"
                         value={date}
                         onChange={(event) => handleDateChange(event.target.value)}
+                        max={new Date().toISOString().split('T')[0]}
                         required
                       />
 

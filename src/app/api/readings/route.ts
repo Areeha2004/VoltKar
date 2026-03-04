@@ -125,6 +125,11 @@ export async function POST(request: NextRequest) {
     if (Number.isNaN(readingDate.getTime())) {
       return NextResponse.json({ error: 'Invalid date' }, { status: 400 })
     }
+    const endOfToday = new Date()
+    endOfToday.setHours(23, 59, 59, 999)
+    if (readingDate > endOfToday) {
+      return NextResponse.json({ error: 'Future dates are not allowed for meter readings' }, { status: 400 })
+    }
 
     // Check for duplicate reading (same meter, week, month, year) for this user
     const existing = await prisma.meterReading.findFirst({

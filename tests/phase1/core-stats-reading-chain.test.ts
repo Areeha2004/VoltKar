@@ -477,6 +477,37 @@ describe('Phase 1 - Core Stats + Reading Chain', () => {
     expect(after.mtd.usage_kwh).toBe(40)
   })
 
+  it('keeps MTD usage non-zero when a meter reading resets and then rises', async () => {
+    addMeter({ id: 'm1', userId: 'user-1', label: 'Main' })
+
+    addReading({ id: 'r1', meterId: 'm1', userId: 'user-1', reading: 10265, week: 5, month: 1, year: 2026, date: dateOf('2026-01-31T08:00:00.000Z') })
+    addReading({ id: 'r2', meterId: 'm1', userId: 'user-1', reading: 9999, week: 1, month: 2, year: 2026, date: dateOf('2026-02-01T08:00:00.000Z') })
+    addReading({ id: 'r3', meterId: 'm1', userId: 'user-1', reading: 10099, week: 2, month: 2, year: 2026, date: dateOf('2026-02-14T08:00:00.000Z') })
+
+    const stats = await computeStatsBundle('user-1')
+
+    expect(stats.mtd.usage_kwh).toBe(100)
+    expect(stats.mtd.cost_pkr).toBeGreaterThan(0)
+  })
+
+  it('rejects future-dated reading creation requests', async () => {
+    addMeter({ id: 'm1', userId: 'user-1', label: 'Main' })
+
+    const req = jsonRequest('http://localhost:3000/api/readings', {
+      meterId: 'm1',
+      reading: 120,
+      date: '2026-02-25T08:00:00.000Z',
+      week: 4,
+      month: 2,
+      year: 2026
+    })
+
+    const res = await createReading(req)
+    const payload = await res.json()
+    expect(res.status).toBe(400)
+    expect(payload.error).toMatch(/future dates/i)
+  })
+
   it('enforces duplicate reading slot protection (meter/week/month/year)', async () => {
     addMeter({ id: 'm1', userId: 'user-1', label: 'Main' })
 

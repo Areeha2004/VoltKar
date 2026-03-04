@@ -1,15 +1,8 @@
-/**
- * Central Statistics Service – SINGLE SOURCE OF TRUTH
- * SAFE cumulative-meter handling + strict month isolation
- */
-
 import { tariffEngine } from './tariffEngine'
-import { getBudgetFromStorage } from './budgetManager'
+import { getMonthlyBudgetPkr } from './budgetStore'
 import prisma from './prisma'
 
 const TIMEZONE = 'Asia/Karachi'
-
-/* ───────────────── TYPES ───────────────── */
 
 export interface TimeWindow {
   now: Date
@@ -61,7 +54,39 @@ export interface StatsBundle {
   calcId: string
 }
 
-/* ───────────────── TIME WINDOW ───────────────── */
+interface UsageCostStats {
+  usage_kwh: number
+  cost_pkr: number
+  meter_count: number
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100
+}
+
+function dayOfMonthInTimeZone(date: Date, timeZone: string): number {
+  const local = new Date(date.toLocaleString('en-US', { timeZone }))
+  return local.getDate()
+}
+
+function endOfDay(date: Date): Date {
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    23,
+    59,
+    59,
+    999
+  )
+}
+
+function toDateKey(date: Date): string {
+  const y = date.getFullYear()
+  const m = `${date.getMonth() + 1}`.padStart(2, '0')
+  const d = `${date.getDate()}`.padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
 
 function getCurrentTimeWindow(): TimeWindow {
   const now = new Date()
@@ -85,55 +110,131 @@ function getMonthRange(year: number, month: number) {
   }
 }
 
-/* ───────────────── HELPERS ───────────────── */
-
-function efficiency(current: number, baseline: number): number {
-  if (current <= 0 || baseline <= 0) return 100
-  return Math.max(50, Math.min(150, (baseline / current) * 100))
-}
-
-/* ───────────────── PREVIOUS MONTH ───────────────── */
-
-async function getPreviousMonthStats(userId: string, meterId?: string, window?: TimeWindow) {
-  window ||= getCurrentTimeWindow()
-
+function getPreviousMonthWindow(window: TimeWindow) {
   const prevMonth = window.monthStart.getMonth() === 0 ? 11 : window.monthStart.getMonth() - 1
   const prevYear =
     window.monthStart.getMonth() === 0
       ? window.monthStart.getFullYear() - 1
       : window.monthStart.getFullYear()
 
-  const { start, end } = getMonthRange(prevYear, prevMonth)
+  return { prevYear, prevMonth, ...getMonthRange(prevYear, prevMonth) }
+}
 
-  const base: any = { userId }
-  if (meterId) base.meterId = meterId
+function efficiency(current: number, baseline: number): number {
+  if (current <= 0 || baseline <= 0) return 100
+  return Math.max(50, Math.min(150, (baseline / current) * 100))
+}
 
-  const baseline = await prisma.meterReading.findFirst({
-    where: { ...base, date: { lt: start } },
-    orderBy: { date: 'desc' }
+function pctDelta(current: number, previous: number): number {
+  if (previous <= 0) return 0
+  return round2(((current - previous) / previous) * 100)
+}
+
+async function resolveMeterIds(userId: string, meterId?: string): Promise<string[]> {
+  if (meterId) return [meterId]
+
+  const meters = await prisma.meter.findMany({
+    where: { userId },
+    select: { id: true }
   })
 
+  return meters.map(m => m.id)
+}
+
+async function computeMeterUsageInRange(
+  meterId: string,
+  start: Date,
+  end: Date
+): Promise<{
+  usage: number
+  hasData: boolean
+  latestReadingDate: Date | null
+  latestIsOfficialEndOfMonth: boolean
+}> {
   const readings = await prisma.meterReading.findMany({
-    where: { ...base, date: { gte: start, lte: end } },
-    orderBy: { date: 'asc' }
+    where: {
+      meterId,
+      date: { gte: start, lte: end }
+    },
+    orderBy: [{ date: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+    select: { reading: true, date: true, isOfficialEndOfMonth: true }
   })
 
-  // FALLBACK: If current user only has very sparse data (like just 2 readings total), 
-  // don't force it into calendar months if it's the ONLY data they have.
-  if (!baseline || readings.length === 0) {
-    return { usage_kwh: 0, cost_pkr: 0 }
+  if (readings.length === 0) {
+    return {
+      usage: 0,
+      hasData: false,
+      latestReadingDate: null,
+      latestIsOfficialEndOfMonth: false
+    }
   }
 
-  const usage = Math.max(0, readings.at(-1)!.reading - baseline.reading)
-  const cost = tariffEngine(usage).totalCost
+  const baseline = await prisma.meterReading.findFirst({
+    where: { meterId, date: { lt: start } },
+    orderBy: [{ date: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+    select: { reading: true }
+  })
+
+  const baselineReading = baseline?.reading ?? readings[0].reading
+  const latestReadingEntry = readings[readings.length - 1]
+  const latestReading = latestReadingEntry.reading
+  const usage = Math.max(0, latestReading - baselineReading)
 
   return {
-    usage_kwh: Math.round(usage * 100) / 100,
-    cost_pkr: Math.round(cost * 100) / 100
+    usage,
+    hasData: true,
+    latestReadingDate: latestReadingEntry.date,
+    latestIsOfficialEndOfMonth: Boolean(latestReadingEntry.isOfficialEndOfMonth)
   }
 }
 
-/* ───────────────── CURRENT MONTH ───────────────── */
+async function aggregateUsageAndCostByMeters(
+  meterIds: string[],
+  start: Date,
+  end: Date
+): Promise<UsageCostStats> {
+  if (meterIds.length === 0) {
+    return { usage_kwh: 0, cost_pkr: 0, meter_count: 0 }
+  }
+
+  let totalUsage = 0
+  let totalCost = 0
+  let meterCount = 0
+
+  for (const id of meterIds) {
+    const meterStats = await computeMeterUsageInRange(id, start, end)
+    if (!meterStats.hasData) continue
+
+    meterCount += 1
+    totalUsage += meterStats.usage
+    totalCost += tariffEngine(meterStats.usage).totalCost
+  }
+
+  return {
+    usage_kwh: round2(totalUsage),
+    cost_pkr: round2(totalCost),
+    meter_count: meterCount
+  }
+}
+
+async function getPreviousMonthStats(userId: string, meterId?: string, window?: TimeWindow) {
+  const safeWindow = window || getCurrentTimeWindow()
+  const meterIds = await resolveMeterIds(userId, meterId)
+  const { start, end } = getPreviousMonthWindow(safeWindow)
+
+  return aggregateUsageAndCostByMeters(meterIds, start, end)
+}
+
+async function getPreviousSamePeriodStats(userId: string, meterId?: string, window?: TimeWindow) {
+  const safeWindow = window || getCurrentTimeWindow()
+  const meterIds = await resolveMeterIds(userId, meterId)
+  const { prevYear, prevMonth, start } = getPreviousMonthWindow(safeWindow)
+  const prevMonthDays = new Date(prevYear, prevMonth + 1, 0).getDate()
+  const samePeriodEndDay = Math.min(safeWindow.daysElapsed, prevMonthDays)
+  const end = new Date(prevYear, prevMonth, samePeriodEndDay, 23, 59, 59, 999)
+
+  return aggregateUsageAndCostByMeters(meterIds, start, end)
+}
 
 async function getCurrentMonthStats(
   userId: string,
@@ -143,86 +244,114 @@ async function getCurrentMonthStats(
   mtdUsage: number
   mtdCost: number
   forecastUsage: number
+  forecastCost: number
   method: 'actual' | 'proportional' | 'early_estimate'
+  metersWithData: number
 }> {
-  window ||= getCurrentTimeWindow()
-
-  const { start, end } = getMonthRange(
-    window.monthStart.getFullYear(),
-    window.monthStart.getMonth()
-  )
-
-  const base: any = { userId }
-  if (meterId) base.meterId = meterId
-
-  // THE FIX: If there is NO reading before the current month start, 
-  // we take the first reading OF the current month as the baseline.
-  let baseline = await prisma.meterReading.findFirst({
-    where: { ...base, date: { lt: start } },
-    orderBy: { date: 'desc' }
-  })
-
-  const readings = await prisma.meterReading.findMany({
-    where: { ...base, date: { gte: start, lte: end } },
-    orderBy: { date: 'asc' }
-  })
-
-  if (readings.length === 0) {
-    return { mtdUsage: 0, mtdCost: 0, forecastUsage: 0, method: 'early_estimate' }
-  }
-
-  // If no reading exists before this month, use the first reading of this month as baseline
-  if (!baseline) {
-    baseline = readings[0]
-  }
-
-  const latest = readings.at(-1)!
-  const mtdUsage = Math.max(0, latest.reading - baseline.reading)
-  const mtdCost = tariffEngine(mtdUsage).totalCost
-
-  // Forecast Logic
-  if (window.daysElapsed < 3 || mtdUsage <= 0) {
+  const safeWindow = window || getCurrentTimeWindow()
+  const meterIds = await resolveMeterIds(userId, meterId)
+  if (meterIds.length === 0) {
     return {
-      mtdUsage,
-      mtdCost,
-      forecastUsage: mtdUsage,
-      method: 'early_estimate'
+      mtdUsage: 0,
+      mtdCost: 0,
+      forecastUsage: 0,
+      forecastCost: 0,
+      method: 'early_estimate',
+      metersWithData: 0
     }
   }
 
-  const dailyAvg = mtdUsage / window.daysElapsed
-  const forecastUsage = dailyAvg * window.daysInMonth
+  const currentRange = getMonthRange(
+    safeWindow.monthStart.getFullYear(),
+    safeWindow.monthStart.getMonth()
+  )
+  const mtdEnd = endOfDay(safeWindow.now)
+  const previousRange = getPreviousMonthWindow(safeWindow)
+
+  let mtdUsage = 0
+  let mtdCost = 0
+  let forecastUsage = 0
+  let forecastCost = 0
+  let metersWithData = 0
+  let metersMonthComplete = 0
+
+  for (const id of meterIds) {
+    const currentStats = await computeMeterUsageInRange(id, currentRange.start, mtdEnd)
+    if (!currentStats.hasData) continue
+
+    metersWithData += 1
+    mtdUsage += currentStats.usage
+
+    const meterMtdCost = tariffEngine(currentStats.usage).totalCost
+    mtdCost += meterMtdCost
+
+    const latestReadingDay = currentStats.latestReadingDate
+      ? dayOfMonthInTimeZone(new Date(currentStats.latestReadingDate), TIMEZONE)
+      : safeWindow.daysElapsed
+    const meterObservedDays = Math.max(1, Math.min(safeWindow.daysElapsed, latestReadingDay))
+    const meterHasMonthCompleteReading =
+      currentStats.latestIsOfficialEndOfMonth || latestReadingDay >= safeWindow.daysInMonth
+
+    if (meterHasMonthCompleteReading) {
+      metersMonthComplete += 1
+    }
+
+    let meterForecastUsage = currentStats.usage
+    if (meterObservedDays >= 3 && currentStats.usage > 0) {
+      meterForecastUsage = (currentStats.usage / meterObservedDays) * safeWindow.daysInMonth
+    }
+
+    const prevStats = await computeMeterUsageInRange(id, previousRange.start, previousRange.end)
+    const cappedForecastUsage =
+      prevStats.hasData && prevStats.usage > 0
+        ? Math.min(meterForecastUsage, prevStats.usage * 1.4)
+        : meterForecastUsage
+
+    forecastUsage += cappedForecastUsage
+    forecastCost +=
+      safeWindow.daysElapsed >= safeWindow.daysInMonth && meterHasMonthCompleteReading
+        ? meterMtdCost
+        : tariffEngine(cappedForecastUsage).totalCost
+  }
+
+  const method: 'actual' | 'proportional' | 'early_estimate' =
+    metersWithData === 0 || safeWindow.daysElapsed < 3 || mtdUsage <= 0
+      ? 'early_estimate'
+      : safeWindow.daysElapsed >= safeWindow.daysInMonth &&
+          metersMonthComplete === metersWithData
+        ? 'actual'
+        : 'proportional'
+
+  if (method === 'actual') {
+    forecastUsage = mtdUsage
+    forecastCost = mtdCost
+  }
 
   return {
-    mtdUsage,
-    mtdCost,
-    forecastUsage,
-    method: window.daysElapsed >= window.daysInMonth ? 'actual' : 'proportional'
+    mtdUsage: round2(mtdUsage),
+    mtdCost: round2(mtdCost),
+    forecastUsage: round2(forecastUsage),
+    forecastCost: round2(forecastCost),
+    method,
+    metersWithData
   }
 }
-
-/* ───────────────── MAIN BUNDLE ───────────────── */
 
 export async function computeStatsBundle(userId: string, meterId?: string): Promise<StatsBundle> {
   const calcId = `calc_${Date.now()}`
   const window = getCurrentTimeWindow()
 
   const prev = await getPreviousMonthStats(userId, meterId, window)
+  const prevSamePeriod = await getPreviousSamePeriodStats(userId, meterId, window)
   const cur = await getCurrentMonthStats(userId, meterId, window)
+  const budget = await getMonthlyBudgetPkr(userId)
 
-  // Forecast Capping logic
-  const cappedForecastUsage =
-    prev.usage_kwh > 0
-      ? Math.min(cur.forecastUsage, prev.usage_kwh * 1.4)
-      : cur.forecastUsage
+  const mtdEfficiency = round2(efficiency(cur.mtdUsage, prev.usage_kwh))
+  const prevSamePeriodEfficiency = round2(efficiency(prevSamePeriod.usage_kwh, prev.usage_kwh))
 
-  const forecastCost =
-    cur.method === 'actual'
-      ? cur.mtdCost
-      : tariffEngine(cappedForecastUsage).totalCost
-
-  const budget = getBudgetFromStorage()
-  const prorated = budget ? (budget * window.daysElapsed) / window.daysInMonth : 0
+  const proratedBudget = budget ? (budget * window.daysElapsed) / window.daysInMonth : 0
+  const projectedOverrun = budget ? Math.max(0, cur.forecastCost - budget) : 0
+  const remainingToBudget = budget ? Math.max(0, budget - cur.mtdCost) : 0
 
   return {
     timeframeLabels: {
@@ -233,129 +362,218 @@ export async function computeStatsBundle(userId: string, meterId?: string): Prom
     window,
     mtd: {
       usage_kwh: cur.mtdUsage,
-      cost_pkr: Math.round(cur.mtdCost * 100) / 100,
-      efficiency_score: Math.round(efficiency(cur.mtdUsage, prev.usage_kwh)),
+      cost_pkr: cur.mtdCost,
+      efficiency_score: mtdEfficiency,
       vs_prev_same_period: {
-        delta_kwh: 0, delta_cost: 0, delta_efficiency: 0, pct_kwh: 0, pct_cost: 0, pct_efficiency: 0
+        delta_kwh: round2(cur.mtdUsage - prevSamePeriod.usage_kwh),
+        delta_cost: round2(cur.mtdCost - prevSamePeriod.cost_pkr),
+        delta_efficiency: round2(mtdEfficiency - prevSamePeriodEfficiency),
+        pct_kwh: pctDelta(cur.mtdUsage, prevSamePeriod.usage_kwh),
+        pct_cost: pctDelta(cur.mtdCost, prevSamePeriod.cost_pkr),
+        pct_efficiency: pctDelta(mtdEfficiency, prevSamePeriodEfficiency)
       }
     },
     prevMonthFull: {
-      ...prev,
+      usage_kwh: prev.usage_kwh,
+      cost_pkr: prev.cost_pkr,
       efficiency_score: 100
     },
     forecast: {
-      usage_kwh: Math.round(cappedForecastUsage * 100) / 100,
-      cost_pkr: Math.round(forecastCost * 100) / 100,
+      usage_kwh: cur.forecastUsage,
+      cost_pkr: cur.forecastCost,
       method: cur.method,
       vs_prev_full: {
-        delta_kwh: Math.round((cappedForecastUsage - prev.usage_kwh) * 100) / 100,
-        delta_cost: Math.round((forecastCost - prev.cost_pkr) * 100) / 100,
-        pct_kwh: prev.usage_kwh ? Math.round(((cappedForecastUsage - prev.usage_kwh) / prev.usage_kwh) * 10000) / 100 : 0,
-        pct_cost: prev.cost_pkr ? Math.round(((forecastCost - prev.cost_pkr) / prev.cost_pkr) * 10000) / 100 : 0
+        delta_kwh: round2(cur.forecastUsage - prev.usage_kwh),
+        delta_cost: round2(cur.forecastCost - prev.cost_pkr),
+        pct_kwh: pctDelta(cur.forecastUsage, prev.usage_kwh),
+        pct_cost: pctDelta(cur.forecastCost, prev.cost_pkr)
       }
     },
     budget: {
       monthly_pkr: budget,
-      prorated_budget_pkr: prorated,
+      monthly_budget_pkr: budget,
+      prorated_budget_pkr: round2(proratedBudget),
       mtd_vs_budget: {
-        delta_pkr: budget ? cur.mtdCost - prorated : 0,
-        pct_used: budget ? (cur.mtdCost / budget) * 100 : 0
+        delta_pkr: budget ? round2(cur.mtdCost - proratedBudget) : 0,
+        pct_used: budget ? round2((cur.mtdCost / budget) * 100) : 0
       },
       forecast_vs_budget: {
-        delta_pkr: budget ? forecastCost - budget : 0,
-        pct_over: budget ? Math.max(0, ((forecastCost - budget) / budget) * 100) : 0
+        delta_pkr: budget ? round2(cur.forecastCost - budget) : 0,
+        pct_over: budget ? round2(Math.max(0, ((cur.forecastCost - budget) / budget) * 100)) : 0
       },
-      status: !budget ? 'On Track' : forecastCost > budget ? 'Over Budget' : forecastCost > budget * 0.9 ? 'At Risk' : 'On Track'
+      projected_overrun_pkr: round2(projectedOverrun),
+      remaining_to_budget_pkr: round2(remainingToBudget),
+      status:
+        !budget
+          ? 'On Track'
+          : cur.forecastCost > budget
+            ? 'Over Budget'
+            : cur.forecastCost > budget * 0.9
+              ? 'At Risk'
+              : 'On Track'
     },
     optimization: {
       current_usage_mtd_kwh: cur.mtdUsage,
-      projected_cost_pkr: Math.round(forecastCost * 100) / 100,
-      potential_savings_pkr: Math.round(forecastCost * 0.15 * 100) / 100
+      projected_cost_pkr: cur.forecastCost,
+      potential_savings_pkr: round2(cur.forecastCost * 0.15)
     },
     data_quality: {
-      warnings: cur.method === 'early_estimate' ? ['Insufficient data for accurate forecast'] : [],
-      gaps: [], duplicates: 0, outliers: 0
+      warnings:
+        cur.method === 'early_estimate'
+          ? ['Insufficient data for accurate forecast']
+          : [],
+      gaps: [],
+      duplicates: 0,
+      outliers: 0
     },
     calcId
   }
 }
 
-/**
- * Get analytics time series data for charts
- */
 export async function getAnalyticsTimeSeries(userId: string, meterId?: string): Promise<{
   dailyUsage: Array<{ date: string; usage: number; cost: number }>
   weeklyBreakdown: Array<{ week: number; usage: number; cost: number }>
   budgetProgress: Array<{ day: number; spent: number; budget: number }>
 }> {
   const window = getCurrentTimeWindow()
-  const baseWhere: any = { userId }
-  if (meterId) baseWhere.meterId = meterId
-
-  const readings = await prisma.meterReading.findMany({
-    where: {
-      ...baseWhere,
-      date: {
-        gte: window.monthStart,
-        lte: new Date(window.monthStart.getFullYear(), window.monthStart.getMonth() + 1, 0, 23, 59, 59, 999)
-      }
-    },
-    orderBy: { date: 'asc' }
-  })
-
-  // Daily usage series
-  const dailyUsageMap = new Map<string, { usage: number; cost: number }>()
-  readings.forEach(reading => {
-    const date = new Date(reading.date).toISOString().split('T')[0]
-    const existing = dailyUsageMap.get(date) || { usage: 0, cost: 0 }
-    dailyUsageMap.set(date, {
-      usage: existing.usage + (reading.usage || 0),
-      cost: existing.cost + (reading.estimatedCost || 0)
-    })
-  })
-
-  const dailySeries = Array.from(dailyUsageMap.entries()).map(([date, data]) => ({
-    date,
-    usage: Math.round(data.usage * 100) / 100,
-    cost: Math.round(data.cost * 100) / 100
-  }))
-
-  // Weekly breakdown
-  const weeklyBreakdown = []
-  for (let week = 1; week <= 5; week++) {
-    const weekReadings = readings.filter(r => r.week === week)
-    const weekUsage = weekReadings.reduce((sum, r) => sum + (r.usage || 0), 0)
-    const weekCost = weekReadings.reduce((sum, r) => sum + (r.estimatedCost || 0), 0)
-    
-    weeklyBreakdown.push({
-      week,
-      usage: Math.round(weekUsage * 100) / 100,
-      cost: Math.round(weekCost * 100) / 100
-    })
+  const meterIds = await resolveMeterIds(userId, meterId)
+  if (meterIds.length === 0) {
+    return {
+      dailyUsage: [],
+      weeklyBreakdown: [
+        { week: 1, usage: 0, cost: 0 },
+        { week: 2, usage: 0, cost: 0 },
+        { week: 3, usage: 0, cost: 0 },
+        { week: 4, usage: 0, cost: 0 },
+        { week: 5, usage: 0, cost: 0 }
+      ],
+      budgetProgress: []
+    }
   }
 
-  // Budget progress
-  const monthlyBudget = getBudgetFromStorage()
-  const budgetProgress = []
-  
+  const monthStart = window.monthStart
+  const monthEnd = endOfDay(window.now)
+
+  const dailyUsageMap = new Map<string, number>()
+  const dailyCostMap = new Map<string, number>()
+  const weeklyUsageMap = new Map<number, number>()
+  const weeklyCostMap = new Map<number, number>()
+
+  for (const id of meterIds) {
+    const [baseline, readings] = await Promise.all([
+      prisma.meterReading.findFirst({
+        where: { meterId: id, date: { lt: monthStart } },
+        orderBy: [{ date: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+        select: { reading: true }
+      }),
+      prisma.meterReading.findMany({
+        where: {
+          meterId: id,
+          date: { gte: monthStart, lte: monthEnd }
+        },
+        orderBy: [{ date: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+        select: {
+          reading: true,
+          date: true,
+          week: true
+        }
+      })
+    ])
+
+    if (readings.length === 0) continue
+
+    const meterDailyUsage = new Map<string, number>()
+    const meterWeeklyUsage = new Map<number, number>()
+    let previousValue = baseline?.reading ?? readings[0].reading
+
+    for (const reading of readings) {
+      const usage = Math.max(0, reading.reading - previousValue)
+      previousValue = reading.reading
+
+      const dateKey = toDateKey(new Date(reading.date))
+      meterDailyUsage.set(dateKey, (meterDailyUsage.get(dateKey) || 0) + usage)
+      meterWeeklyUsage.set(reading.week, (meterWeeklyUsage.get(reading.week) || 0) + usage)
+    }
+
+    const meterTotalUsage = Array.from(meterDailyUsage.values()).reduce((sum, usage) => sum + usage, 0)
+    const meterTotalCost = meterTotalUsage > 0 ? tariffEngine(meterTotalUsage).totalCost : 0
+
+    for (const [dateKey, usage] of meterDailyUsage.entries()) {
+      const allocatedCost = meterTotalUsage > 0 ? meterTotalCost * (usage / meterTotalUsage) : 0
+      dailyUsageMap.set(dateKey, (dailyUsageMap.get(dateKey) || 0) + usage)
+      dailyCostMap.set(dateKey, (dailyCostMap.get(dateKey) || 0) + allocatedCost)
+    }
+
+    for (const [week, usage] of meterWeeklyUsage.entries()) {
+      const allocatedCost = meterTotalUsage > 0 ? meterTotalCost * (usage / meterTotalUsage) : 0
+      weeklyUsageMap.set(week, (weeklyUsageMap.get(week) || 0) + usage)
+      weeklyCostMap.set(week, (weeklyCostMap.get(week) || 0) + allocatedCost)
+    }
+  }
+
+  const dailyUsage = Array.from(dailyUsageMap.entries())
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([date, usage]) => ({
+      date,
+      usage: round2(usage),
+      cost: round2(dailyCostMap.get(date) || 0)
+    }))
+
+  const weeklyBreakdown = [1, 2, 3, 4, 5].map(week => ({
+    week,
+    usage: round2(weeklyUsageMap.get(week) || 0),
+    cost: round2(weeklyCostMap.get(week) || 0)
+  }))
+
+  const monthlyBudget = await getMonthlyBudgetPkr(userId)
+  const budgetProgress: Array<{ day: number; spent: number; budget: number }> = []
+
   if (monthlyBudget) {
     let cumulativeCost = 0
     for (let day = 1; day <= window.daysElapsed; day++) {
-      const dayReadings = readings.filter(r => new Date(r.date).getDate() === day)
-      const dayCost = dayReadings.reduce((sum, r) => sum + (r.estimatedCost || 0), 0)
-      cumulativeCost += dayCost
-      
+      const date = new Date(window.now.getFullYear(), window.now.getMonth(), day)
+      const dateKey = toDateKey(date)
+      cumulativeCost += dailyCostMap.get(dateKey) || 0
+
       budgetProgress.push({
         day,
-        spent: Math.round(cumulativeCost * 100) / 100,
-        budget: Math.round((monthlyBudget * day) / window.daysInMonth * 100) / 100
+        spent: round2(cumulativeCost),
+        budget: round2((monthlyBudget * day) / window.daysInMonth)
       })
     }
   }
 
   return {
-    dailyUsage: dailySeries,
+    dailyUsage,
     weeklyBreakdown,
     budgetProgress
+  }
+}
+
+export async function validateInvariants(userId: string, meterId?: string) {
+  const stats = await computeStatsBundle(userId, meterId)
+  const issues: string[] = []
+
+  if (stats.window.daysElapsed < 1 || stats.window.daysElapsed > stats.window.daysInMonth) {
+    issues.push('Invalid day counters in time window')
+  }
+  if (stats.mtd.usage_kwh < 0 || stats.prevMonthFull.usage_kwh < 0 || stats.forecast.usage_kwh < 0) {
+    issues.push('Negative usage values detected')
+  }
+  if (stats.mtd.cost_pkr < 0 || stats.prevMonthFull.cost_pkr < 0 || stats.forecast.cost_pkr < 0) {
+    issues.push('Negative cost values detected')
+  }
+  if (
+    stats.forecast.method === 'actual' &&
+    Math.abs(stats.forecast.cost_pkr - stats.mtd.cost_pkr) > 0.01
+  ) {
+    issues.push('Actual forecast does not match MTD cost')
+  }
+
+  return {
+    valid: issues.length === 0,
+    issues,
+    calcId: stats.calcId,
+    checkedAt: new Date().toISOString()
   }
 }

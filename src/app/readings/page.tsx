@@ -1,199 +1,235 @@
 'use client'
-import React, { useState, useEffect } from 'react'
+
+import React, { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { useSession } from 'next-auth/react'
-import { useRouter } from 'next/navigation'
-import { Calendar, Home, Save, History, Plus, Zap, TrendingUp, Clock, CheckCircle, AlertCircle, Camera, Upload, RefreshCw, Hash } from 'lucide-react'
+import {
+  AlertCircle,
+  Calendar,
+  CheckCircle,
+  Clock,
+  History,
+  Home,
+  Plus,
+  RefreshCw,
+  Save,
+  TrendingUp,
+  Zap,
+} from 'lucide-react'
+
 import Navbar from '../../components/layout/Navbar'
 import Sidebar from '../../components/layout/Sidebar'
 import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
 import Input from '../../components/ui/Input'
-import { tariffEngine, calculateUsage, getSlabWarningMessage } from '../../lib/tariffEngine'
+import { calculateUsage, getSlabWarningMessage, tariffEngine } from '../../lib/tariffEngine'
 
-const ReadingEntryPage: React.FC = () => {
-  const { data: session } = useSession()
-  const router = useRouter()
-  
-  // Form state
-  const [selectedMeter, setSelectedMeter] = useState('main-house')
-  const [week, setWeek] = useState(Math.ceil(new Date().getDate() / 7))
-  const [reading, setReading] = useState('')
-  const [isOfficialEndOfMonth, setIsOfficialEndOfMonth] = useState(false)
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0])
-  const [notes, setNotes] = useState('')
-  const [photoMode, setPhotoMode] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [submitError, setSubmitError] = useState<string | null>(null)
-  
-  // Data state
-  const [meters, setMeters] = useState<any[]>([])
-  const [recentReadings, setRecentReadings] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [refreshing, setRefreshing] = useState(false)
+type Meter = {
+  id: string
+  label: string
+  type: string
+  lastReading: number
+  lastReadingDate: string | null
+  status: 'active' | 'inactive' | string
+}
 
-  // Fetch meters and readings
-  useEffect(() => {
-  const fetchData = async () => {
-    if (!session?.user?.id) return;
-    try {
-      setLoading(true);
-      setError(null);
-
-      const metersResponse = await fetch('/api/meters');
-      if (!metersResponse.ok) throw new Error('Failed to fetch meters');
-      const metersData = await metersResponse.json();
-
-      const readingsResponse = await fetch('/api/readings?limit=10');
-      if (!readingsResponse.ok) throw new Error('Failed to fetch readings');
-      const readingsData = await readingsResponse.json();
-
-      setMeters(metersData.meters || []);
-      setRecentReadings(readingsData.readings || []);
-
-      if (metersData.meters && metersData.meters.length > 0) {
-        setSelectedMeter(metersData.meters[0].id);
-      }
-
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load data');
-      console.error('Data fetch error:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  fetchData();
-}, [session?.user?.id]);
-
-  // Refresh readings data
-  const refreshReadings = async () => {
-    try {
-      setRefreshing(true);
-      const readingsResponse = await fetch('/api/readings?limit=10');
-      if (!readingsResponse.ok) throw new Error('Failed to fetch readings');
-      const readingsData = await readingsResponse.json();
-      setRecentReadings(readingsData.readings || []);
-    } catch (err) {
-      console.error('Failed to refresh readings:', err);
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
-    submitReading()
-  }
-
- const submitReading = async () => {
-  if (!selectedMeter || !reading || !date) {
-    setSubmitError('Please fill in all required fields')
-    return
-  }
-
-  try {
-    setSubmitting(true)
-    setSubmitError(null)
-
-    const readingDate = new Date(date)
-    const month = readingDate.getMonth() + 1
-    const year = readingDate.getFullYear()
-    const calculatedWeek = week || Math.ceil(readingDate.getDate() / 7)
-
-    const response = await fetch('/api/readings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        meterId: selectedMeter,
-        reading: parseFloat(reading),
-        week: calculatedWeek,
-        month,
-        year,
-        isOfficialEndOfMonth,
-        notes: notes.trim() || undefined,
-        date: readingDate.toISOString(),
-      }),
-    })
-
-    if (!response.ok) {
-      const errorData = await response.json()
-      throw new Error(errorData.error || 'Failed to submit reading')
-    }
-
-    const data = await response.json()
-    
-    // Add the new reading to the top of the list
-    setRecentReadings(prev => [data.reading, ...prev.slice(0, 9)]);
-    
-    // Update the meter's last reading
-
-    setMeters(ms => ms.map(m => m.id === selectedMeter ? { ...m, lastReading: parseFloat(reading) } : m))
-
-    setReading('')
-    setNotes('')
-    setIsOfficialEndOfMonth(false)
-    setDate(new Date().toISOString().split('T')[0])
-    setWeek(Math.ceil(new Date().getDate() / 7))
-
-    // Show success message
-    const successMsg = `Reading submitted successfully! Usage: ${data.reading.usage || 0} kWh, Cost: Rs ${(data.reading.estimatedCost || 0).toLocaleString()}`;
-    alert(successMsg);
-    
-  } catch (err) {
-    setSubmitError(err instanceof Error ? err.message : 'Failed to submit reading')
-  } finally {
-    setSubmitting(false)
+type ReadingItem = {
+  id: string
+  week: number
+  reading: number
+  usage: number
+  estimatedCost: number
+  isOfficialEndOfMonth: boolean
+  notes?: string | null
+  date: string
+  createdAt: string
+  meter: {
+    id: string
+    label: string
+    type: string
   }
 }
 
-  const selectedMeterData = meters.find(m => m.id === selectedMeter)
-  
-  // Calculate usage and cost for preview
-  const calculatedUsage = selectedMeterData && reading ? calculateUsage(parseFloat(reading), selectedMeterData.lastReading || 0) : 0;
-  const calculatedCost = calculatedUsage > 0 ? tariffEngine(calculatedUsage) : null;
-  
-  // Calculate projected monthly usage for warnings
-  const currentDate = new Date()
-  const daysElapsed = currentDate.getDate()
-  const projectedMonthlyUsage = calculatedUsage > 0 ? (calculatedUsage / daysElapsed) * 30 : 0
+const ReadingEntryPage: React.FC = () => {
+  const { data: session } = useSession()
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'verified': 
-      case 'active': return <CheckCircle className="h-4 w-4 text-primary" />
-      case 'pending': 
-      case 'inactive': return <Clock className="h-4 w-4 text-accent-amber" />
-      default: return <AlertCircle className="h-4 w-4 text-foreground-tertiary" />
+  const [selectedMeter, setSelectedMeter] = useState('')
+  const [week, setWeek] = useState(Math.ceil(new Date().getDate() / 7))
+  const [reading, setReading] = useState('')
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0])
+  const [notes, setNotes] = useState('')
+  const [isOfficialEndOfMonth, setIsOfficialEndOfMonth] = useState(false)
+
+  const [meters, setMeters] = useState<Meter[]>([])
+  const [recentReadings, setRecentReadings] = useState<ReadingItem[]>([])
+  const [mtdUsageKwh, setMtdUsageKwh] = useState(0)
+  const [mtdDaysElapsed, setMtdDaysElapsed] = useState(new Date().getDate())
+
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
+
+  const fetchPageData = async (showRefreshing = false) => {
+    try {
+      if (showRefreshing) {
+        setRefreshing(true)
+      } else {
+        setLoading(true)
+      }
+      setError(null)
+
+      const [metersResponse, readingsResponse, statsResponse] = await Promise.all([
+        fetch('/api/meters'),
+        fetch('/api/readings?limit=10'),
+        fetch('/api/dashboard/stats'),
+      ])
+
+      if (!metersResponse.ok) throw new Error('Failed to fetch meters')
+      if (!readingsResponse.ok) throw new Error('Failed to fetch readings')
+
+      const metersData = await metersResponse.json()
+      const readingsData = await readingsResponse.json()
+      const statsData = statsResponse.ok ? await statsResponse.json() : null
+
+      const nextMeters = (metersData?.meters || []) as Meter[]
+      const nextReadings = (readingsData?.readings || []) as ReadingItem[]
+
+      setMeters(nextMeters)
+      setRecentReadings(nextReadings)
+      setMtdUsageKwh(Number(statsData?.mtd?.usage_kwh || 0))
+      setMtdDaysElapsed(Number(statsData?.window?.daysElapsed || new Date().getDate()))
+
+      setSelectedMeter((prev) => {
+        if (prev && nextMeters.some((meter) => meter.id === prev)) return prev
+        return nextMeters[0]?.id || ''
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load reading data'
+      setError(message)
+    } finally {
+      setLoading(false)
+      setRefreshing(false)
     }
   }
 
-  const getEfficiencyColor = (efficiency: string) => {
-    switch (efficiency) {
-      case 'excellent': return 'text-primary bg-primary/10'
-      case 'good': return 'text-accent-blue bg-accent-blue/10'
-      case 'fair': return 'text-accent-amber bg-accent-amber/10'
-      default: return 'text-foreground-secondary bg-background-secondary'
+  useEffect(() => {
+    if (!session?.user?.id) {
+      setLoading(false)
+      return
+    }
+    void fetchPageData()
+  }, [session?.user?.id])
+
+  const selectedMeterData = meters.find((meter) => meter.id === selectedMeter)
+  const parsedReading = Number(reading)
+  const usageDelta =
+    selectedMeterData && Number.isFinite(parsedReading)
+      ? calculateUsage(parsedReading, Number(selectedMeterData.lastReading || 0))
+      : 0
+  const previewCost = usageDelta > 0 ? tariffEngine(usageDelta) : null
+  const slabWarning = usageDelta > 0 ? getSlabWarningMessage(usageDelta) : null
+
+  const avgDailyUsage = useMemo(
+    () => (mtdDaysElapsed > 0 ? mtdUsageKwh / mtdDaysElapsed : 0),
+    [mtdUsageKwh, mtdDaysElapsed]
+  )
+
+  const handleDateChange = (value: string) => {
+    setDate(value)
+    const parsed = new Date(value)
+    if (!Number.isNaN(parsed.getTime())) {
+      setWeek(Math.ceil(parsed.getDate() / 7))
+    }
+  }
+
+  const clearForm = () => {
+    setReading('')
+    setNotes('')
+    setIsOfficialEndOfMonth(false)
+    const today = new Date()
+    setDate(today.toISOString().split('T')[0])
+    setWeek(Math.ceil(today.getDate() / 7))
+  }
+
+  const submitReading = async (event: React.FormEvent) => {
+    event.preventDefault()
+    setSubmitError(null)
+    setSuccessMessage(null)
+
+    if (!selectedMeter || !reading || !date) {
+      setSubmitError('Please fill in meter, date, and reading.')
+      return
+    }
+
+    const numericReading = Number(reading)
+    if (!Number.isFinite(numericReading) || numericReading < 0) {
+      setSubmitError('Reading must be a valid non-negative number.')
+      return
+    }
+
+    if (selectedMeterData && numericReading < Number(selectedMeterData.lastReading || 0)) {
+      setSubmitError('Current reading cannot be lower than the previous meter reading.')
+      return
+    }
+
+    try {
+      setSubmitting(true)
+
+      const readingDate = new Date(date)
+      const month = readingDate.getMonth() + 1
+      const year = readingDate.getFullYear()
+
+      const response = await fetch('/api/readings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          meterId: selectedMeter,
+          reading: numericReading,
+          week,
+          month,
+          year,
+          date: readingDate.toISOString(),
+          isOfficialEndOfMonth,
+          notes: notes.trim() || undefined,
+        }),
+      })
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload?.error || 'Failed to submit reading')
+      }
+
+      const payload = await response.json()
+      const newReading = payload?.reading as ReadingItem
+
+      if (newReading) {
+        setRecentReadings((prev) => [newReading, ...prev].slice(0, 10))
+      }
+
+      clearForm()
+      setSuccessMessage('Reading submitted successfully.')
+      await fetchPageData(true)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to submit reading'
+      setSubmitError(message)
+    } finally {
+      setSubmitting(false)
     }
   }
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen bg-background text-foreground">
         <Navbar />
         <div className="flex">
           <Sidebar />
-          <main className="flex-1 p-8">
-            <div className="max-w-7xl mx-auto">
-              <div className="animate-pulse space-y-8">
-                <div className="h-8 bg-background-card rounded w-1/3"></div>
-                <div className="grid md:grid-cols-4 gap-6">
-                  {[1, 2, 3, 4].map(i => (
-                    <div key={i} className="h-32 bg-background-card rounded-2xl"></div>
-                  ))}
-                </div>
-              </div>
+          <main className="flex flex-1 items-center justify-center px-6">
+            <div className="flex flex-col items-center gap-4">
+              <div className="h-12 w-12 animate-spin rounded-full border-2 border-cyan-300/30 border-t-cyan-300" />
+              <p className="text-sm text-foreground-secondary">Loading readings workspace...</p>
             </div>
           </main>
         </div>
@@ -202,450 +238,351 @@ const ReadingEntryPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Background Effects */}
-      <div className="fixed inset-0 mesh-gradient pointer-events-none opacity-20" />
-      <div className="fixed inset-0 bg-[radial-gradient(circle_at_70%_30%,rgba(59,130,246,0.1),transparent_50%)] pointer-events-none" />
-      
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute -left-20 top-0 h-72 w-72 rounded-full bg-cyan-500/15 blur-[110px]" />
+        <div className="absolute right-0 top-1/3 h-80 w-80 rounded-full bg-primary/12 blur-[130px]" />
+      </div>
+
       <Navbar />
-      
-      <div className="flex">
+
+      <div className="relative flex">
         <Sidebar />
-        
-        <main className="flex-1 p-8">
-          <div className="max-w-7xl mx-auto space-y-8">
-            {/* Header */}
-            <div className="flex items-center justify-between animate-fade-in">
-              <div className="space-y-3">
-                <div className="flex items-center space-x-3">
-                  <div className="bg-gradient-to-r from-primary to-accent-cyan p-3 rounded-2xl">
-                    <Home className="h-8 w-8 text-white" />
-                  </div>
-                  <div>
-                    <h1 className="text-4xl font-bold text-foreground font-sora">Reading Entry</h1>
-                    <p className="text-xl text-foreground-secondary">Record and track your electricity meter readings</p>
-                  </div>
+
+        <main className="flex-1 px-4 pb-10 pt-6 md:px-8">
+          <div className="mx-auto max-w-6xl space-y-6">
+            <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-[#0a1323]/95 via-[#0f1a2d]/95 to-[#081220]/95 p-6 shadow-premium md:p-8">
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+                <div className="space-y-2">
+                  <p className="text-xs uppercase tracking-[0.22em] text-foreground-tertiary">Readings</p>
+                  <h1 className="font-sora text-3xl font-bold md:text-4xl">Meter Reading Entry</h1>
+                  <p className="max-w-2xl text-sm text-foreground-secondary md:text-base">
+                    Submit accurate cumulative meter values and keep your billing chain reliable.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    variant="outline"
+                    onClick={() => void fetchPageData(true)}
+                    disabled={refreshing}
+                    className="border-white/15 bg-white/[0.03] text-foreground"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                    {refreshing ? 'Refreshing...' : 'Refresh'}
+                  </Button>
+                  <Link
+                    href="/meters"
+                    className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/[0.03] px-4 py-2.5 text-sm font-semibold text-foreground hover:bg-white/[0.08]"
+                  >
+                    <Home className="h-4 w-4" />
+                    Manage Meters
+                  </Link>
                 </div>
               </div>
-              <div className="flex items-center space-x-4">
-                <Button variant="outline" onClick={() => setPhotoMode(!photoMode)}>
-                  <Camera className="h-5 w-5 mr-2" />
-                  {photoMode ? 'Manual Entry' : 'Photo Capture'}
-                </Button>
-                <Button variant="outline" onClick={() => router.push('/meters')}>
-                  <Home className="h-5 w-5 mr-2" />
-                  Manage Meters
-                </Button>
-              </div>
-            </div>
+            </section>
 
-            {/* Quick Stats */}
-            <div className="grid md:grid-cols-4 gap-6">
+            {error && (
+              <section className="rounded-2xl border border-red-500/25 bg-red-500/10 p-4 text-red-100">
+                <p className="text-sm">{error}</p>
+              </section>
+            )}
+
+            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               {[
-                { 
-                  title: 'Total Meters', 
-                  value: meters.length.toString(), 
-                  icon: Home, 
-                  gradient: 'from-primary to-accent-cyan',
-                  description: 'Active connections'
+                {
+                  title: 'Total Meters',
+                  value: meters.length.toString(),
+                  helper: 'Active connections',
+                  icon: Home,
                 },
-                { 
-                  title: 'This Month', 
-                  value: recentReadings.length > 0 ? Math.round(recentReadings.reduce((sum, r) => sum + (r.usage || 0), 0)).toString() : '0',
-                  unit: 'kWh',
-                  icon: Zap, 
-                  gradient: 'from-accent-blue to-accent-purple',
-                  description: 'Current usage'
+                {
+                  title: 'Usage MTD',
+                  value: `${Math.round(mtdUsageKwh).toLocaleString()} kWh`,
+                  helper: 'Current billing cycle',
+                  icon: Zap,
                 },
-                { 
-                  title: 'Last Reading', 
-                  value: recentReadings.length > 0 ? 
-                    Math.ceil((Date.now() - new Date(recentReadings[0].date).getTime()) / (1000 * 60 * 60 * 24)).toString() : 
-                    'No',
-                  unit: recentReadings.length > 0 ? 'days ago' : 'readings',
-                  icon: Clock, 
-                  gradient: 'from-accent-amber to-accent-pink',
-                  description: recentReadings.length > 0 ? recentReadings[0].meter.label : 'Add first reading'
+                {
+                  title: 'Avg Daily',
+                  value: `${avgDailyUsage.toFixed(2)} kWh`,
+                  helper: `${mtdDaysElapsed} days elapsed`,
+                  icon: TrendingUp,
                 },
-                { 
-                  title: 'Avg. Daily', 
-                  value: recentReadings.length > 0 ? (recentReadings.reduce((sum, r) => sum + (r.usage || 0), 0) / 30).toFixed(1) : '0',
-                  unit: 'kWh',
-                  icon: TrendingUp, 
-                  gradient: 'from-accent-emerald to-primary',
-                  description: 'This month'
-                }
-              ].map((stat, index) => (
-                <Card key={index} className="card-premium animate-fade-in" >
-                  <div style={{ animationDelay: `${index * 0.1}s` }}>
-                      <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="relative">
-                        <div className={`absolute inset-0 bg-gradient-to-r ${stat.gradient} rounded-2xl blur-xl opacity-20`} />
-                        <div className={`relative bg-gradient-to-r ${stat.gradient} p-3 rounded-2xl`}>
-                          <stat.icon className="h-6 w-6 text-white" />
-                        </div>
-                      </div>
+                {
+                  title: 'Last Reading',
+                  value:
+                    recentReadings.length > 0
+                      ? `${Math.max(0, Math.ceil((Date.now() - new Date(recentReadings[0].date).getTime()) / (1000 * 60 * 60 * 24)))} days`
+                      : 'None',
+                  helper: recentReadings[0]?.meter?.label || 'No records yet',
+                  icon: Clock,
+                },
+              ].map((item) => (
+                <Card key={item.title} className="border border-white/10 bg-[#0f1727]/75">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.16em] text-foreground-tertiary">{item.title}</p>
+                      <p className="mt-2 font-sora text-2xl font-semibold">{item.value}</p>
+                      <p className="mt-2 text-xs text-foreground-secondary">{item.helper}</p>
                     </div>
-                    <div className="space-y-1">
-                      <p className="text-foreground-secondary text-sm font-medium">{stat.title}</p>
-                      <div className="flex items-baseline space-x-2">
-                        <span className="text-3xl font-bold text-foreground font-mono">{stat.value}</span>
-                        {stat.unit && <span className="text-foreground-tertiary text-sm">{stat.unit}</span>}
-                      </div>
-                      <p className="text-xs text-foreground-muted">{stat.description}</p>
-                    </div>
+                    <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03]">
+                      <item.icon className="h-5 w-5 text-cyan-200" />
+                    </span>
                   </div>
-                    </div>
-                
                 </Card>
               ))}
-            </div>
+            </section>
 
-            <div className="grid lg:grid-cols-3 gap-8">
-              {/* Reading Entry Form */}
+            <section className="grid gap-6 lg:grid-cols-3">
               <div className="lg:col-span-2">
-                <Card className="card-premium">
-                  <form onSubmit={handleSubmit} className="space-y-8">
-                    <div className="flex items-center space-x-3 mb-8">
-                      <div className="bg-gradient-to-r from-accent-blue to-accent-purple p-3 rounded-2xl">
-                        <Plus className="h-7 w-7 text-white" />
-                      </div>
+                <Card className="border border-white/10 bg-[#0f1727]/75">
+                  <form onSubmit={submitReading} className="space-y-6">
+                    <div className="flex items-center justify-between">
                       <div>
-                        <h2 className="text-2xl font-semibold text-foreground font-sora">New Reading Entry</h2>
-                        <p className="text-foreground-secondary">Add your latest meter reading</p>
+                        <h2 className="font-sora text-xl font-semibold">New Reading</h2>
+                        <p className="text-sm text-foreground-secondary">Enter cumulative meter value for selected date.</p>
                       </div>
+                      <span className="rounded-full border border-white/15 px-2.5 py-1 text-xs text-foreground-secondary">
+                        Week {week}
+                      </span>
                     </div>
 
-                    {/* Meter Selection */}
-                    <div className="space-y-4">
-                      <label className="text-lg font-semibold text-foreground">Select Meter</label>
-                      {meters.length > 0 ? (
-                        <div className="grid md:grid-cols-2 gap-4">
-                          {meters.map((meter) => (
+                    {meters.length > 0 ? (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {meters.map((meter) => {
+                          const isSelected = meter.id === selectedMeter
+                          return (
                             <button
                               key={meter.id}
                               type="button"
                               onClick={() => setSelectedMeter(meter.id)}
-                              className={`p-6 rounded-2xl border-2 transition-all duration-300 text-left group ${
-                                selectedMeter === meter.id
-                                  ? 'border-primary bg-primary/10 shadow-glow'
-                                  : 'border-border hover:border-border-light hover:bg-background-card/50'
+                              className={`rounded-2xl border p-4 text-left transition ${
+                                isSelected
+                                  ? 'border-cyan-400/35 bg-cyan-500/10'
+                                  : 'border-white/10 bg-white/[0.03] hover:bg-white/[0.05]'
                               }`}
                             >
-                              <div className="space-y-3">
-                                <div className="flex items-center justify-between">
-                                  <h3 className="font-semibold text-foreground text-lg">{meter.label}</h3>
-                                  <div className={`w-3 h-3 rounded-full ${
-                                    meter.status === 'active' ? 'bg-primary' : 'bg-foreground-tertiary'
-                                  }`} />
-                                </div>
-                                <div className="space-y-2">
-                                  <p className="text-sm text-foreground-secondary">{meter.type}</p>
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-sm text-foreground-tertiary">Last Reading:</span>
-                                    <span className="font-mono font-semibold text-foreground">
-                                      {meter.lastReading ? meter.lastReading.toLocaleString() : 'No readings'}
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-sm text-foreground-tertiary">Date:</span>
-                                    <span className="text-sm text-foreground">
-                                      {meter.lastReadingDate ? 
-                                        new Date(meter.lastReadingDate).toLocaleDateString() : 
-                                        'Never'
-                                      }
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
+                              <p className="text-sm font-semibold text-foreground">{meter.label}</p>
+                              <p className="text-xs text-foreground-tertiary">{meter.type || 'Meter'}</p>
+                              <p className="mt-2 text-xs text-foreground-secondary">
+                                Last reading: {Number(meter.lastReading || 0).toLocaleString()}
+                              </p>
                             </button>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="text-center py-8 border-2 border-dashed border-border rounded-2xl">
-                          <Home className="h-12 w-12 mx-auto text-foreground-tertiary mb-4" />
-                          <p className="text-foreground-secondary mb-4">No meters found</p>
-                          <button
-                            onClick={() => router.push('/meters')}
-                            className="text-primary hover:text-primary-light font-semibold"
-                          >
-                            Add your first meter to get started
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="grid md:grid-cols-3 gap-6">
-                      {/* Date Selection */}
-                      <div className="relative">
-                        <Input
-                          type="date"
-                          label="Reading Date"
-                          value={date}
-                          onChange={(e) => setDate(e.target.value)}
-                          required
-                        />
-                        
+                          )
+                        })}
                       </div>
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-white/15 bg-white/[0.02] p-5 text-sm text-foreground-secondary">
+                        No meters found. Add one first from the meters page.
+                      </div>
+                    )}
 
-                      {/* Week Selection */}
-                      <div className="space-y-2">
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <Input
+                        type="date"
+                        label="Reading Date"
+                        value={date}
+                        onChange={(event) => handleDateChange(event.target.value)}
+                        required
+                      />
+
+                      <div className="space-y-3">
                         <label className="text-sm font-medium text-foreground-secondary">Week of Month</label>
                         <select
                           value={week}
-                          onChange={(e) => setWeek(parseInt(e.target.value))}
+                          onChange={(event) => setWeek(Number(event.target.value))}
                           className="input-field w-full"
                         >
-                          {[1, 2, 3, 4, 5].map(w => (
-                            <option key={w} value={w}>Week {w}</option>
+                          {[1, 2, 3, 4, 5].map((value) => (
+                            <option key={`week-${value}`} value={value}>
+                              Week {value}
+                            </option>
                           ))}
                         </select>
                       </div>
 
-                      {/* Reading Input */}
-                      <div className="relative">
-                        <Input
-                          type="number"
-                          label="Meter Reading (kWh)"
-                          placeholder="Enter current reading"
-                          value={reading}
-                          onChange={(e) => setReading(e.target.value)}
-                          required
-                        />
-                        {photoMode && (
-                          <button
-                            type="button"
-                            className="absolute right-4 top-12 p-1 rounded-lg hover:bg-background-card transition-colors"
-                          >
-                            <Upload className="h-5 w-5 text-foreground-tertiary" />
-                          </button>
-                        )}
-                      </div>
+                      <Input
+                        type="number"
+                        label="Reading (Cumulative kWh)"
+                        placeholder="Enter meter value"
+                        value={reading}
+                        onChange={(event) => setReading(event.target.value)}
+                        min="0"
+                        step="0.01"
+                        required
+                      />
                     </div>
 
-                    {/* Official End of Month Checkbox */}
-                    <div className="flex items-center space-x-3 p-4 rounded-2xl bg-background-card/30 border border-border/30">
+                    <div className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                       <input
+                        id="official-end-month"
                         type="checkbox"
-                        id="isOfficialEndOfMonth"
                         checked={isOfficialEndOfMonth}
-                        onChange={(e) => setIsOfficialEndOfMonth(e.target.checked)}
-                        className="w-5 h-5 rounded border-border bg-background-card text-primary focus:ring-primary/20"
+                        onChange={(event) => setIsOfficialEndOfMonth(event.target.checked)}
+                        className="mt-1 h-4 w-4 rounded border-white/20 bg-background"
                       />
                       <div>
-                        <label htmlFor="isOfficialEndOfMonth" className="font-medium text-foreground cursor-pointer">
+                        <label htmlFor="official-end-month" className="text-sm font-semibold text-foreground">
                           Official End-of-Month Reading
                         </label>
-                        <p className="text-sm text-foreground-secondary">
-                          Check this if this is your official monthly reading for bill calculation
+                        <p className="text-xs text-foreground-secondary">
+                          Enable when this reading is your official monthly close reading.
                         </p>
                       </div>
                     </div>
 
-                    {/* Cost Preview */}
-                    {reading && selectedMeterData && calculatedUsage > 0 && calculatedCost && (
-                      <Card className="bg-gradient-to-r from-primary/10 to-accent-cyan/10 border border-primary/20">
-                        <div className="space-y-4">
-                          <h3 className="font-semibold text-foreground flex items-center space-x-2">
-                            <Zap className="h-5 w-5 text-primary" />
-                            <span>Cost Preview</span>
-                          </h3>
-                          
-                          <div className="grid grid-cols-2 gap-4">
-                            <div className="text-center p-3 rounded-xl bg-background-card/50">
-                              <p className="text-sm text-foreground-secondary">Usage</p>
-                              <p className="text-2xl font-bold text-foreground">{calculatedUsage} kWh</p>
-                            </div>
-                            <div className="text-center p-3 rounded-xl bg-background-card/50">
-                              <p className="text-sm text-foreground-secondary">Estimated Cost</p>
-                              <p className="text-2xl font-bold text-primary">Rs {Math.round(calculatedCost.totalCost).toLocaleString()}</p>
-                            </div>
-                          </div>
-
-                          {/* Slab Warning */}
-                          {(() => {
-                            const warningMessage = getSlabWarningMessage(calculatedUsage)
-                            if (warningMessage) {
-                              return (
-                                <div className="p-3 rounded-xl bg-accent-amber/10 border border-accent-amber/20">
-                                  <div className="flex items-center space-x-2">
-                                    <AlertCircle className="h-4 w-4 text-accent-amber" />
-                                    <p className="text-sm text-accent-amber font-medium">Slab Warning</p>
-                                  </div>
-                                  <p className="text-sm text-foreground-secondary mt-1">{warningMessage}</p>
-                                </div>
-                              )
-                            }
-                            return null
-                          })()}
+                    {reading && selectedMeterData && usageDelta > 0 && previewCost && (
+                      <div className="rounded-2xl border border-cyan-500/25 bg-cyan-500/10 p-4">
+                        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-cyan-100">
+                          <Zap className="h-4 w-4" />
+                          Preview
                         </div>
-                      </Card>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3 text-sm">
+                            <p className="text-foreground-tertiary">Usage Delta</p>
+                            <p className="mt-1 text-lg font-semibold text-foreground">{usageDelta.toFixed(2)} kWh</p>
+                          </div>
+                          <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3 text-sm">
+                            <p className="text-foreground-tertiary">Estimated Cost</p>
+                            <p className="mt-1 text-lg font-semibold text-emerald-300">
+                              Rs {Math.round(previewCost.totalCost).toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+                        {slabWarning && (
+                          <div className="mt-3 rounded-xl border border-amber-500/25 bg-amber-500/10 p-3 text-sm text-amber-100">
+                            {slabWarning}
+                          </div>
+                        )}
+                      </div>
                     )}
-                    
-                    {/* Notes */}
+
                     <div className="space-y-3">
-                      <label className="text-lg font-semibold text-foreground">Notes (Optional)</label>
+                      <label className="text-sm font-medium text-foreground-secondary">Notes (optional)</label>
                       <textarea
-                        placeholder="Add any observations about this reading, meter condition, or unusual circumstances..."
-                        value={notes}
-                        onChange={(e) => setNotes(e.target.value)}
                         rows={4}
+                        value={notes}
+                        onChange={(event) => setNotes(event.target.value)}
+                        placeholder="Optional context about this reading"
                         className="input-field w-full resize-none"
                       />
                     </div>
 
-                    {/* Error Display */}
                     {submitError && (
-                      <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/20">
-                        <div className="flex items-center space-x-2">
-                          <AlertCircle className="h-5 w-5 text-red-400" />
-                          <p className="text-red-400">{submitError}</p>
-                        </div>
+                      <div className="rounded-xl border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-100">
+                        {submitError}
                       </div>
                     )}
 
-                    {/* Submit Button */}
-                    <Button 
-                      type="submit" 
-                      className="w-full premium-button text-lg py-6"
-                      disabled={submitting || !selectedMeter || !reading || meters.length === 0}
+                    {successMessage && (
+                      <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 p-3 text-sm text-emerald-100">
+                        {successMessage}
+                      </div>
+                    )}
+
+                    <Button
+                      type="submit"
+                      disabled={submitting || !selectedMeter || meters.length === 0}
+                      className="w-full"
                     >
-                      <Save className="h-6 w-6 mr-3" />
-                      {submitting ? 'Saving...' : `Save ${isOfficialEndOfMonth ? 'Official' : 'Weekly'} Reading`}
+                      <Save className="h-4 w-4" />
+                      {submitting
+                        ? 'Saving...'
+                        : `Save ${isOfficialEndOfMonth ? 'Official' : 'Reading'} Entry`}
                     </Button>
                   </form>
                 </Card>
               </div>
 
-              {/* Recent Readings Sidebar */}
-              <Card className="card-premium">
-                <div className="space-y-6">
-                  <div className="flex items-center space-x-3">
-                    <div className="bg-gradient-to-r from-accent-amber to-accent-pink p-2 rounded-xl">
-                      <History className="h-6 w-6 text-white" />
-                    </div>
-                    <div>
-                      <h2 className="text-xl font-semibold text-foreground font-sora">Recent Readings</h2>
-                      <p className="text-foreground-secondary text-sm">Latest entries</p>
-                    </div>
+              <Card className="border border-white/10 bg-[#0f1727]/75">
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <h2 className="font-sora text-xl font-semibold">Recent Entries</h2>
+                    <p className="text-xs text-foreground-secondary">Latest 10 readings</p>
                   </div>
-                  
-                  <div className="flex justify-end">
-                    <Button variant="ghost" size="sm" onClick={refreshReadings} disabled={refreshing}>
-                      <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-                      {refreshing ? 'Refreshing...' : 'Refresh'}
-                    </Button>
-                  </div>
+                  <Button variant="ghost" size="sm" onClick={() => void fetchPageData(true)} disabled={refreshing}>
+                    <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                  </Button>
+                </div>
 
-                  <div className="space-y-4">
-                    {recentReadings.length > 0 ? recentReadings.map((entry, index) => (
-                      <div key={index} className="p-5 rounded-2xl bg-background-card/30 border border-border/30 space-y-3 hover:bg-background-card/50 transition-all duration-300 animate-fade-in" style={{ animationDelay: `${index * 0.1}s` }}>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-2">
-                            <span className="font-semibold text-foreground">{entry.meter.label}</span>
-                            {entry.isOfficialEndOfMonth && (
-                              <span className="px-2 py-1 rounded-full text-xs font-medium bg-primary/10 text-primary">
-                                Official
-                              </span>
-                            )}
-                            {getStatusIcon('verified')}
-                          </div>
-                          <span className="text-sm text-foreground-tertiary">
-                            {new Date(entry.createdAt).toLocaleDateString()}
-                          </span>
-                        </div>
-                        
-                        <div className="grid grid-cols-3 gap-3 text-sm">
+                <div className="space-y-3">
+                  {recentReadings.length > 0 ? (
+                    recentReadings.map((entry) => (
+                      <article key={entry.id} className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                        <div className="flex items-start justify-between gap-2">
                           <div>
-                            <p className="text-foreground-tertiary">Week</p>
-                            <p className="font-semibold text-foreground">Week {entry.week || 1}</p>
+                            <p className="text-sm font-semibold text-foreground">{entry.meter?.label || 'Meter'}</p>
+                            <p className="text-xs text-foreground-tertiary">
+                              {new Date(entry.date || entry.createdAt).toLocaleDateString()} | Week {entry.week || 1}
+                            </p>
                           </div>
+                          {entry.isOfficialEndOfMonth && (
+                            <span className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-200">
+                              Official
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
                           <div>
                             <p className="text-foreground-tertiary">Reading</p>
-                            <p className="font-semibold text-foreground font-mono">{entry.reading?.toLocaleString() || 'N/A'}</p>
+                            <p className="font-semibold text-foreground">{Number(entry.reading || 0).toLocaleString()}</p>
                           </div>
                           <div>
                             <p className="text-foreground-tertiary">Usage</p>
-                            <p className="font-semibold text-foreground">{entry.usage?.toFixed(1) || '0'} kWh</p>
+                            <p className="font-semibold text-foreground">{Number(entry.usage || 0).toFixed(2)} kWh</p>
+                          </div>
+                          <div>
+                            <p className="text-foreground-tertiary">Cost</p>
+                            <p className="font-semibold text-emerald-300">Rs {Math.round(Number(entry.estimatedCost || 0)).toLocaleString()}</p>
                           </div>
                         </div>
-
-                        <div className="pt-2 border-t border-border/30">
-                          <div className="flex justify-between items-center">
-                            <span className="text-sm text-foreground-secondary">Estimated Cost:</span>
-                            <span className="font-bold text-primary">Rs {Math.round(entry.estimatedCost || 0).toLocaleString()}</span>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center justify-between pt-2 border-t border-border/30">
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${getEfficiencyColor('good')}`}>
-                            good efficiency
-                          </span>
-                          <span className="text-xs text-foreground-tertiary capitalize">verified</span>
-                        </div>
-                      </div>
-                    )) : (
-                      <div className="text-center py-8">
-                        <History className="h-12 w-12 mx-auto text-foreground-tertiary mb-4" />
-                        <p className="text-foreground-secondary">No readings recorded yet</p>
-                        <p className="text-sm text-foreground-tertiary">Submit your first reading to get started</p>
-                      </div>
-                    )}
-                  </div>
-
-                  <Button 
-                    variant="outline" 
-                    className="w-full"
-                    onClick={() => router.push('/analytics')}
-                  >
-                    <History className="h-4 w-4 mr-2" />
-                    View All Readings
-                  </Button>
-                </div>
-              </Card>
-            </div>
-
-            {/* Reading Tips */}
-            <Card className="card-premium">
-              <div className="space-y-6">
-                <div className="flex items-center space-x-3">
-                  <div className="bg-gradient-to-r from-accent-emerald to-primary p-2 rounded-xl">
-                    <CheckCircle className="h-6 w-6 text-white" />
-                  </div>
-                  <div>
-                    <h2 className="text-xl font-semibold text-foreground font-sora">Reading Best Practices</h2>
-                    <p className="text-foreground-secondary">Tips for accurate meter readings</p>
-                  </div>
-                </div>
-                
-                <div className="grid md:grid-cols-3 gap-6">
-                  {[
-                    {
-                      title: 'Consistent Timing',
-                      description: 'Take readings at consistent intervals (weekly) for accurate usage tracking',
-                      icon: Clock
-                    },
-                    {
-                      title: 'Photo Documentation',
-                      description: 'Capture photos of your meter display for verification and record keeping',
-                      icon: Camera
-                    },
-                    {
-                      title: 'Note Anomalies',
-                      description: 'Record any unusual readings, meter conditions, or special circumstances',
-                      icon: AlertCircle
-                    }
-                  ].map((tip, index) => (
-                    <div key={index} className="p-5 rounded-2xl bg-background-card/30 border border-border/30 space-y-3">
-                      <tip.icon className="h-8 w-8 text-primary" />
-                      <h3 className="font-semibold text-foreground">{tip.title}</h3>
-                      <p className="text-sm text-foreground-secondary leading-relaxed">{tip.description}</p>
+                      </article>
+                    ))
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-white/15 bg-white/[0.02] p-4 text-sm text-foreground-secondary">
+                      No readings yet. Submit your first entry.
                     </div>
-                  ))}
+                  )}
                 </div>
+
+                <Link
+                  href="/analytics"
+                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-white/15 px-4 py-2 text-sm font-semibold text-foreground-secondary hover:bg-white/5 hover:text-foreground"
+                >
+                  <History className="h-4 w-4" />
+                  Open Analytics
+                </Link>
+              </Card>
+            </section>
+
+            <section className="rounded-3xl border border-white/10 bg-[#0f1727]/75 p-6">
+              <h2 className="mb-4 font-sora text-lg font-semibold">Reading Rules</h2>
+              <div className="grid gap-4 md:grid-cols-3">
+                {[
+                  {
+                    title: 'Use cumulative value',
+                    description: 'Enter the total meter number shown, not weekly or monthly consumption.',
+                    icon: Plus,
+                  },
+                  {
+                    title: 'Keep interval consistent',
+                    description: 'Use similar reading intervals to improve forecast and anomaly detection quality.',
+                    icon: Calendar,
+                  },
+                  {
+                    title: 'Validate before submit',
+                    description: 'Check meter, date, and value to avoid chain recalculation conflicts.',
+                    icon: CheckCircle,
+                  },
+                ].map((item) => (
+                  <div key={item.title} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                    <item.icon className="h-5 w-5 text-cyan-200" />
+                    <p className="mt-2 text-sm font-semibold text-foreground">{item.title}</p>
+                    <p className="mt-1 text-sm text-foreground-secondary">{item.description}</p>
+                  </div>
+                ))}
               </div>
-            </Card>
+            </section>
           </div>
         </main>
       </div>

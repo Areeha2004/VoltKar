@@ -1,148 +1,153 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import { authOptions } from '../../auth/[...nextauth]/route'
-import prisma from '@/lib/prisma'
-import { monitorBudget, generateBudgetAdjustments, calculateBudgetEfficiency } from '@/lib/budgetMonitor'
-import { getBudgetFromStorage } from '@/lib/budgetManager'
-import { computeMTD, forecastUsage, forecastBill } from '@/lib/analytics'
+import { authOptions } from '@/lib/authOptions'
+import { computeStatsBundle } from '@/lib/statService'
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100
+}
 
 export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
-    
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const { searchParams } = new URL(request.url)
     const meterId = searchParams.get('meterId')
-    
-    const currentDate = new Date()
-    const currentMonth = currentDate.getMonth() + 1
-    const currentYear = currentDate.getFullYear()
-    const daysInMonth = new Date(currentYear, currentMonth, 0).getDate()
-    const daysElapsed = currentDate.getDate()
+    const budgetOverride = searchParams.get('budget')
 
-    // Get budget from request or storage (in real app, this would be from database)
-    const budgetParam = searchParams.get('budget')
-    const budgetRs = budgetParam ? parseFloat(budgetParam) : 25000 // Default budget
+    const stats = await computeStatsBundle(session.user.id, meterId || undefined)
 
-    // Build query conditions
-    const whereConditions: any = {
-      userId: session.user.id,
-      month: currentMonth,
-      year: currentYear
+    const parsedOverride = budgetOverride ? Number(budgetOverride) : null
+    const effectiveBudget =
+      Number.isFinite(parsedOverride) && (parsedOverride as number) > 0
+        ? (parsedOverride as number)
+        : stats.budget.monthly_budget_pkr
+
+    const spent = stats.mtd.cost_pkr
+    const projected = stats.forecast.cost_pkr
+    const daysElapsed = stats.window.daysElapsed
+    const daysInMonth = stats.window.daysInMonth
+    const daysLeft = Math.max(0, daysInMonth - daysElapsed)
+    const averageDailyCost = daysElapsed > 0 ? spent / daysElapsed : 0
+
+    const budgetTarget = effectiveBudget || 0
+    const dailyBudget = budgetTarget > 0 ? budgetTarget / daysInMonth : 0
+    const remainingBudget = budgetTarget > 0 ? Math.max(0, budgetTarget - spent) : 0
+    const remainingDaily = daysLeft > 0 ? remainingBudget / daysLeft : 0
+    const costEfficiency =
+      budgetTarget > 0 ? Math.max(0, Math.min(100, 100 - (projected / budgetTarget - 1) * 100)) : 0
+
+    const alerts: Array<{
+      severity: 'low' | 'medium' | 'high' | 'critical'
+      title: string
+      message: string
+      actions?: Array<{ label: string; href: string }>
+    }> = []
+
+    if (!budgetTarget) {
+      alerts.push({
+        severity: 'low',
+        title: 'No Budget Set',
+        message: 'Set a monthly budget to enable budget monitoring and alerts.',
+        actions: [{ label: 'Set Budget', href: '/dashboard' }]
+      })
+    } else if (projected > budgetTarget) {
+      const overrun = round2(projected - budgetTarget)
+      alerts.push({
+        severity: overrun > budgetTarget * 0.2 ? 'critical' : 'high',
+        title: 'Forecast Over Budget',
+        message: `Projected month-end bill exceeds budget by Rs ${overrun.toLocaleString()}.`,
+        actions: [
+          { label: 'Open Optimization', href: '/optimization' },
+          { label: 'Open AI Insights', href: '/analytics' }
+        ]
+      })
+    } else if (spent > budgetTarget * 0.85) {
+      alerts.push({
+        severity: 'medium',
+        title: 'High Budget Utilization',
+        message: 'More than 85% of budget is already used this month.'
+      })
     }
 
-    if (meterId) {
-      whereConditions.meterId = meterId
-    }
-
-    // Fetch current month readings
-    const readings = await prisma.meterReading.findMany({
-      where: whereConditions,
-      include: {
-        meter: {
-          select: {
-            id: true,
-            label: true,
-            type: true
-          }
+    const adjustments = budgetTarget
+      ? {
+          recommendedBudget: round2(Math.max(spent, projected) * 1.05),
+          adjustmentReason:
+            projected > budgetTarget
+              ? 'Current usage trend projects an overrun.'
+              : 'Current usage trend is within target.',
+          alternatives: [
+            {
+              budget: round2(Math.max(spent, projected) * 0.95),
+              description: 'Aggressive savings target'
+            },
+            {
+              budget: round2(Math.max(spent, projected) * 1.1),
+              description: 'Conservative realistic target'
+            }
+          ]
         }
-      },
-      orderBy: {
-        date: 'asc'
+      : null
+
+    const recommendations: string[] = []
+    if (!budgetTarget) {
+      recommendations.push('Set a monthly budget to track spending against a target.')
+    } else {
+      if (projected > budgetTarget) {
+        const dailyReduction = daysLeft > 0 ? (projected - budgetTarget) / daysLeft : 0
+        recommendations.push(
+          `Reduce daily spending by about Rs ${Math.round(dailyReduction)} to recover budget.`
+        )
+        recommendations.push('Open Optimization to get prioritized device-level savings actions.')
+        recommendations.push('Open Analytics AI Insights for behavior and timing recommendations.')
       }
-    })
-
-    // Transform readings for analytics
-    const analyticsReadings = readings.map(reading => ({
-      id: reading.id,
-      date: reading.date,
-      usage: reading.usage || 0,
-      estimatedCost: reading.estimatedCost || 0,
-      week: reading.week,
-      month: reading.month,
-      year: reading.year
-    }))
-
-    // Calculate current costs and projections
-    const mtd = computeMTD(analyticsReadings)
-    const usageForecast = forecastUsage(mtd.usage, daysElapsed, daysInMonth)
-    const billForecast = forecastBill(usageForecast)
-
-    // Monitor budget
-    const alerts = monitorBudget(
-      mtd.cost,
-      billForecast.expected,
-      budgetRs,
-      daysElapsed,
-      daysInMonth
-    )
-
-    // Generate budget adjustments
-    const adjustments = generateBudgetAdjustments(
-      mtd.cost,
-      billForecast.expected,
-      budgetRs,
-      analyticsReadings
-    )
-
-    // Calculate efficiency
-    const efficiency = calculateBudgetEfficiency(mtd.cost, budgetRs)
-
-    // Calculate daily targets and progress
-    const dailyBudget = budgetRs / daysInMonth
-    const averageDailyCost = daysElapsed > 0 ? mtd.cost / daysElapsed : 0
-    const remainingDailyBudget = Math.max(0, (budgetRs - mtd.cost) / Math.max(1, daysInMonth - daysElapsed))
-
-    // Generate recommendations based on current status
-    const recommendations = []
-    
-    if (billForecast.expected > budgetRs) {
-      const overage = billForecast.expected - budgetRs
-      const dailyReduction = overage / Math.max(1, daysInMonth - daysElapsed)
-      recommendations.push(`Reduce daily spending by Rs ${Math.round(dailyReduction)} to stay within budget`)
-    }
-    
-    if (averageDailyCost > dailyBudget * 1.2) {
-      recommendations.push('Your daily spending is 20% above target - focus on peak hour reduction')
-    }
-    
-    if (efficiency.score < 70) {
-      recommendations.push('Consider adjusting your budget target based on actual usage patterns')
+      if (averageDailyCost > dailyBudget && dailyBudget > 0) {
+        recommendations.push('Your daily average is above budget pace; reduce peak-hour usage.')
+      }
+      if (recommendations.length === 0) {
+        recommendations.push('You are on track. Keep current usage pattern.')
+      }
     }
 
     return NextResponse.json({
       success: true,
       data: {
+        timeframeLabels: stats.timeframeLabels,
         budget: {
-          target: budgetRs,
-          spent: Math.round(mtd.cost),
-          remaining: Math.round(budgetRs - mtd.cost),
-          projected: Math.round(billForecast.expected),
-          efficiency: efficiency.score,
-          grade: efficiency.grade
+          target: budgetTarget,
+          spent: round2(spent),
+          remaining: round2(remainingBudget),
+          projected: round2(projected),
+          efficiency: round2(costEfficiency),
+          grade:
+            costEfficiency >= 85 ? 'A' : costEfficiency >= 70 ? 'B' : costEfficiency >= 55 ? 'C' : 'D'
         },
         daily: {
-          target: Math.round(dailyBudget),
-          average: Math.round(averageDailyCost),
-          remaining: Math.round(remainingDailyBudget),
-          daysLeft: daysInMonth - daysElapsed
+          target: round2(dailyBudget),
+          average: round2(averageDailyCost),
+          remaining: round2(remainingDaily),
+          daysLeft
         },
         alerts,
         adjustments,
         recommendations,
         period: {
-          month: currentMonth,
-          year: currentYear,
+          month: stats.window.now.getMonth() + 1,
+          year: stats.window.now.getFullYear(),
           daysElapsed,
           daysInMonth,
-          meterId: meterId || 'all'
+          meterId: meterId || 'all',
+          labels: {
+            mtd: stats.timeframeLabels.mtd,
+            forecast: stats.timeframeLabels.forecast
+          }
         }
       }
     })
-
   } catch (error) {
     console.error('Error monitoring budget:', error)
     return NextResponse.json(

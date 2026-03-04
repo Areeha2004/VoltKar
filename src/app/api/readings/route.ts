@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import { authOptions } from '../auth/[...nextauth]/route'
+import { authOptions } from '@/lib/authOptions'
 import prisma from '@/lib/prisma'
-import { recomputeAnalytics } from '@/lib/analytics'
-import { tariffEngine, calculateUsage } from '@/lib/tariffEngine'
+import { recalculateMeterReadingChain } from '@/lib/readingChain'
 
 export async function GET(request: NextRequest) {
   try {
@@ -27,13 +26,16 @@ export async function GET(request: NextRequest) {
       if (to) where.date.lte = new Date(to)
     }
 
-    const readings = await prisma.meterReading.findMany({
-      where,
-      include: { meter: true },
-      orderBy: { date: 'desc' },
-      take: limit,
-      skip: offset,
-    })
+    const [readings, total] = await Promise.all([
+      prisma.meterReading.findMany({
+        where,
+        include: { meter: true },
+        orderBy: { date: 'desc' },
+        take: limit,
+        skip: offset,
+      }),
+      prisma.meterReading.count({ where })
+    ])
 
     // Calculate aggregates if requested
     const includeAggregates = searchParams.get('aggregates') === 'true'
@@ -48,6 +50,7 @@ export async function GET(request: NextRequest) {
       const weeklyReadings = await prisma.meterReading.findMany({
         where: {
           meterId,
+          userId: session.user.id,
           month: currentMonth,
           year: currentYear
         },
@@ -69,10 +72,10 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ 
+    return NextResponse.json({
       readings,
       aggregates,
-      total: readings.length 
+      total
     })
   } catch (error) {
     console.error('Error fetching readings:', error)
@@ -113,9 +116,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Meter not found' }, { status: 404 })
     }
 
-    // Check for duplicate reading (same meter, week, month, year)
+    const parsedReading = parseFloat(reading)
+    if (!Number.isFinite(parsedReading) || parsedReading < 0) {
+      return NextResponse.json({ error: 'Reading must be a valid non-negative number' }, { status: 400 })
+    }
+
+    const readingDate = date ? new Date(date) : new Date()
+    if (Number.isNaN(readingDate.getTime())) {
+      return NextResponse.json({ error: 'Invalid date' }, { status: 400 })
+    }
+
+    // Check for duplicate reading (same meter, week, month, year) for this user
     const existing = await prisma.meterReading.findFirst({
-      where: { meterId, week, month, year },
+      where: {
+        meterId,
+        userId: session.user.id,
+        week,
+        month,
+        year
+      },
     })
     if (existing) {
       return NextResponse.json(
@@ -124,51 +143,28 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Find previous reading for usage calculation
-    const readingDate = date ? new Date(date) : new Date()
-    const previousReading = await prisma.meterReading.findFirst({
-      where: { 
-        meterId, 
-        date: { lt: readingDate }
-      },
-      orderBy: { date: 'desc' },
-    })
-
-    // Calculate usage
-    const baseValue = previousReading?.reading ?? 0
-    const usage = calculateUsage(parseFloat(reading), baseValue)
-
-    // Calculate cost using tariff engine
-    let estimatedCost = 0
-    if (usage > 0) {
-      const costBreakdown = tariffEngine(usage)
-      estimatedCost = costBreakdown.totalCost
-    }
-
-    // Create the reading
-    const newReading = await prisma.meterReading.create({
+    const createdReading = await prisma.meterReading.create({
       data: {
         meterId,
         userId: session.user.id,
-        reading: parseFloat(reading),
+        reading: parsedReading,
         week,
         month,
         year,
         date: readingDate,
         isOfficialEndOfMonth: isOfficialEndOfMonth || false,
-        usage,
-        estimatedCost,
+        usage: 0,
+        estimatedCost: 0,
         notes: notes?.trim() || null,
       },
-      include: { meter: true },
     })
 
-    // Recompute analytics after creating new reading
-    try {
-      await recomputeAnalytics(session.user.id, meterId)
-    } catch (analyticsError) {
-      console.warn('Analytics recomputation failed:', analyticsError)
-    }
+    await recalculateMeterReadingChain(meterId)
+
+    const newReading = await prisma.meterReading.findUnique({
+      where: { id: createdReading.id },
+      include: { meter: true }
+    })
 
     return NextResponse.json(
       { reading: newReading },
@@ -179,3 +175,4 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+

@@ -3,7 +3,6 @@ import { X, Target, DollarSign, Save, Calculator } from 'lucide-react'
 import Button from '../ui/Button'
 import Input from '../ui/Input'
 import Card from '../ui/Card'
-import { setBudgetInStorage, getBudgetFromStorage } from '../../lib/budgetManager'
 
 interface SetBudgetModalProps {
   isOpen: boolean
@@ -24,7 +23,7 @@ const SetBudgetModal: React.FC<SetBudgetModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      const existingBudget = currentBudget || getBudgetFromStorage()
+      const existingBudget = currentBudget
       if (existingBudget) {
         setBudget(existingBudget.toString())
       }
@@ -54,16 +53,24 @@ const SetBudgetModal: React.FC<SetBudgetModalProps> = ({
     try {
       setLoading(true)
       setError(null)
-      
-      // Save to localStorage
-      setBudgetInStorage(budgetValue)
-      
-      // Call parent callback
+
+      const response = await fetch('/api/budget/target', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ monthly_budget_pkr: budgetValue })
+      })
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload?.error || 'Failed to save budget')
+      }
+
       onBudgetSet(budgetValue)
-      
       onClose()
     } catch (err) {
-      setError('Failed to save budget')
+      setError(err instanceof Error ? err.message : 'Failed to save budget')
     } finally {
       setLoading(false)
     }

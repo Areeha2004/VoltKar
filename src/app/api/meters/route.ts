@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import { authOptions } from '../auth/[...nextauth]/route'
+import { authOptions } from '@/lib/authOptions'
 import prisma from '@/lib/prisma'
 
 export async function GET(request: NextRequest) {
@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
       },
       include: {
         readings: {
-          orderBy: { createdAt: 'desc' },
+          orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
           take: 1
         }
       }
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
     const metersWithStats = meters.map(meter => ({
       ...meter,
       lastReading: meter.readings[0]?.reading || 0,
-      lastReadingDate: meter.readings[0]?.createdAt || null,
+      lastReadingDate: meter.readings[0]?.date || null,
       status: meter.readings.length > 0 ? 'active' : 'inactive'
     }))
 
@@ -47,16 +47,18 @@ export async function POST(request: NextRequest) {
     }
 
     const { label, type } = await request.json()
+    const normalizedLabel = typeof label === 'string' ? label.trim() : ''
+    const normalizedType = typeof type === 'string' ? type.trim() : null
 
-    if (!label || !type) {
-      return NextResponse.json({ error: 'Label and type are required' }, { status: 400 })
+    if (!normalizedLabel) {
+      return NextResponse.json({ error: 'Label is required' }, { status: 400 })
     }
 
     const meter = await prisma.meter.create({
       data: {
         userId: session.user.id,
-        label,
-        type
+        label: normalizedLabel,
+        type: normalizedType
       }
     })
 

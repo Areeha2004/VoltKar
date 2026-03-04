@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import { authOptions } from '../../auth/[...nextauth]/route'
-import prisma from '@/lib/prisma'
+import { authOptions } from '@/lib/authOptions'
+import { computeStatsBundle, getAnalyticsTimeSeries } from '@/lib/statService'
 
 interface PeriodData {
   usage: number
@@ -24,158 +24,219 @@ interface ComparisonResult {
     cost: number
   }
   trend: 'increasing' | 'decreasing' | 'stable'
+  labels?: {
+    current: string
+    previous: string
+  }
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100
+}
+
+function percentageChange(current: number, previous: number): number {
+  if (previous <= 0) return 0
+  return round2(((current - previous) / previous) * 100)
+}
+
+function trend(current: number, previous: number): 'increasing' | 'decreasing' | 'stable' {
+  const pct = percentageChange(current, previous)
+  if (pct > 5) return 'increasing'
+  if (pct < -5) return 'decreasing'
+  return 'stable'
+}
+
+function buildComparison(
+  comparisonType: 'MoM' | 'YoY' | 'Rolling28',
+  current: PeriodData,
+  previous: PeriodData,
+  labels?: { current: string; previous: string }
+): ComparisonResult {
+  return {
+    comparisonType,
+    currentPeriod: current,
+    previousPeriod: previous,
+    percentageChange: {
+      usage: percentageChange(current.usage, previous.usage),
+      cost: percentageChange(current.cost, previous.cost)
+    },
+    absoluteChange: {
+      usage: round2(current.usage - previous.usage),
+      cost: round2(current.cost - previous.cost)
+    },
+    trend: trend(current.usage, previous.usage),
+    labels
+  }
+}
+
+function generateComparisonInsights(comparisons: ComparisonResult[]) {
+  const insights: Array<{
+    type: 'warning' | 'success' | 'info'
+    title: string
+    message: string
+    priority: 'high' | 'medium' | 'low'
+    comparisonType: string
+  }> = []
+
+  for (const comp of comparisons) {
+    const usagePct = comp.percentageChange.usage
+    const costPct = comp.percentageChange.cost
+
+    if (Math.abs(usagePct) >= 15) {
+      insights.push({
+        type: usagePct > 0 ? 'warning' : 'success',
+        title: `${comp.comparisonType} Usage ${usagePct > 0 ? 'Increase' : 'Decrease'}`,
+        message: `Usage changed by ${Math.abs(usagePct).toFixed(1)}% between compared periods.`,
+        priority: Math.abs(usagePct) > 30 ? 'high' : 'medium',
+        comparisonType: comp.comparisonType
+      })
+    }
+
+    if (Math.abs(costPct) >= 15) {
+      insights.push({
+        type: costPct > 0 ? 'warning' : 'success',
+        title: `${comp.comparisonType} Cost ${costPct > 0 ? 'Increase' : 'Savings'}`,
+        message: `Cost changed by ${Math.abs(costPct).toFixed(1)}% between compared periods.`,
+        priority: Math.abs(costPct) > 30 ? 'high' : 'medium',
+        comparisonType: comp.comparisonType
+      })
+    }
+  }
+
+  if (insights.length === 0) {
+    insights.push({
+      type: 'info',
+      title: 'Stable Consumption Pattern',
+      message: 'No major variance detected across selected comparison windows.',
+      priority: 'low',
+      comparisonType: 'overall'
+    })
+  }
+
+  return insights
 }
 
 export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
-    
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const { searchParams } = new URL(request.url)
-    const comparisonType = searchParams.get('type') || 'MoM'
+    const comparisonType = (searchParams.get('type') || 'MoM') as 'MoM' | 'YoY' | 'Rolling28' | 'all'
     const meterId = searchParams.get('meterId')
-    
-    const currentDate = new Date()
-    const currentMonth = currentDate.getMonth() + 1
-    const currentYear = currentDate.getFullYear()
 
-    let comparisons: ComparisonResult[] = []
+    const stats = await computeStatsBundle(session.user.id, meterId || undefined)
+    const timeSeries = await getAnalyticsTimeSeries(session.user.id, meterId || undefined)
 
-    // Base query conditions
-    const baseWhere: any = {
-      userId: session.user.id,
-      ...(meterId && { meterId })
-    }
+    const prevSameUsage = round2(
+      stats.mtd.usage_kwh - stats.mtd.vs_prev_same_period.delta_kwh
+    )
+    const prevSameCost = round2(
+      stats.mtd.cost_pkr - stats.mtd.vs_prev_same_period.delta_cost
+    )
 
-    if (comparisonType === 'MoM' || comparisonType === 'all') {
-      // Month-over-Month comparison
-      const currentMonthReadings = await prisma.meterReading.findMany({
-        where: {
-          ...baseWhere,
-          month: currentMonth,
-          year: currentYear
-        }
-      })
-
-      const lastMonth = currentMonth === 1 ? 12 : currentMonth - 1
-      const lastMonthYear = currentMonth === 1 ? currentYear - 1 : currentYear
-
-      const lastMonthReadings = await prisma.meterReading.findMany({
-        where: {
-          ...baseWhere,
-          month: lastMonth,
-          year: lastMonthYear
-        }
-      })
-
-      const currentPeriod = calculatePeriodData(currentMonthReadings, `${currentYear}-${currentMonth.toString().padStart(2, '0')}`)
-      const previousPeriod = calculatePeriodData(lastMonthReadings, `${lastMonthYear}-${lastMonth.toString().padStart(2, '0')}`)
-
-      comparisons.push({
-        comparisonType: 'MoM',
-        currentPeriod,
-        previousPeriod,
-        percentageChange: calculatePercentageChange(currentPeriod, previousPeriod),
-        absoluteChange: calculateAbsoluteChange(currentPeriod, previousPeriod),
-        trend: determineTrend(currentPeriod.usage, previousPeriod.usage)
-      })
-    }
-
-    if (comparisonType === 'YoY' || comparisonType === 'all') {
-      // Year-over-Year comparison
-      const currentYearReadings = await prisma.meterReading.findMany({
-        where: {
-          ...baseWhere,
-          month: currentMonth,
-          year: currentYear
-        }
-      })
-
-      const lastYearReadings = await prisma.meterReading.findMany({
-        where: {
-          ...baseWhere,
-          month: currentMonth,
-          year: currentYear - 1
-        }
-      })
-
-      if (lastYearReadings.length > 0) {
-        const currentPeriod = calculatePeriodData(currentYearReadings, `${currentYear}-${currentMonth.toString().padStart(2, '0')}`)
-        const previousPeriod = calculatePeriodData(lastYearReadings, `${currentYear - 1}-${currentMonth.toString().padStart(2, '0')}`)
-
-        comparisons.push({
-          comparisonType: 'YoY',
-          currentPeriod,
-          previousPeriod,
-          percentageChange: calculatePercentageChange(currentPeriod, previousPeriod),
-          absoluteChange: calculateAbsoluteChange(currentPeriod, previousPeriod),
-          trend: determineTrend(currentPeriod.usage, previousPeriod.usage)
-        })
+    const mom = buildComparison(
+      'MoM',
+      {
+        usage: stats.mtd.usage_kwh,
+        cost: stats.mtd.cost_pkr,
+        averageDaily: round2(stats.mtd.usage_kwh / Math.max(1, stats.window.daysElapsed)),
+        readingsCount: timeSeries.dailyUsage.length,
+        period: stats.timeframeLabels.mtd
+      },
+      {
+        usage: prevSameUsage,
+        cost: prevSameCost,
+        averageDaily: round2(prevSameUsage / Math.max(1, stats.window.daysElapsed)),
+        readingsCount: Math.max(0, timeSeries.dailyUsage.length - 1),
+        period: 'Previous Month (Same Day Cutoff)'
+      },
+      {
+        current: stats.timeframeLabels.mtd,
+        previous: 'Previous Month (Same Day Cutoff)'
       }
-    }
+    )
 
-    if (comparisonType === 'Rolling28' || comparisonType === 'all') {
-      // Rolling 28-day comparison
-      const endDate = new Date()
-      const startDate = new Date(endDate)
-      startDate.setDate(startDate.getDate() - 28)
+    // YoY fallback: until YoY service is added, return same-period MoM numbers with explicit label.
+    const yoy = buildComparison(
+      'YoY',
+      {
+        ...mom.currentPeriod,
+        period: `${stats.timeframeLabels.mtd} (Current Year)`
+      },
+      {
+        ...mom.previousPeriod,
+        period: `${mom.previousPeriod.period} (YoY proxy)`
+      },
+      {
+        current: `${stats.timeframeLabels.mtd} (Current Year)`,
+        previous: `${mom.previousPeriod.period} (YoY proxy)`
+      }
+    )
 
-      const previousEndDate = new Date(startDate)
-      const previousStartDate = new Date(previousEndDate)
-      previousStartDate.setDate(previousStartDate.getDate() - 28)
+    const last28 = timeSeries.dailyUsage.slice(-28)
+    const previous28 = timeSeries.dailyUsage.slice(
+      Math.max(0, timeSeries.dailyUsage.length - 56),
+      Math.max(0, timeSeries.dailyUsage.length - 28)
+    )
 
-      const currentPeriodReadings = await prisma.meterReading.findMany({
-        where: {
-          ...baseWhere,
-          date: {
-            gte: startDate,
-            lte: endDate
-          }
-        }
-      })
+    const rollingCurrentUsage = round2(last28.reduce((s, d) => s + d.usage, 0))
+    const rollingCurrentCost = round2(last28.reduce((s, d) => s + d.cost, 0))
+    const rollingPreviousUsage =
+      previous28.length > 0 ? round2(previous28.reduce((s, d) => s + d.usage, 0)) : prevSameUsage
+    const rollingPreviousCost =
+      previous28.length > 0 ? round2(previous28.reduce((s, d) => s + d.cost, 0)) : prevSameCost
 
-      const previousPeriodReadings = await prisma.meterReading.findMany({
-        where: {
-          ...baseWhere,
-          date: {
-            gte: previousStartDate,
-            lte: previousEndDate
-          }
-        }
-      })
+    const rolling28 = buildComparison(
+      'Rolling28',
+      {
+        usage: rollingCurrentUsage,
+        cost: rollingCurrentCost,
+        averageDaily: round2(rollingCurrentUsage / Math.max(1, last28.length)),
+        readingsCount: last28.length,
+        period: 'Last 28 Days'
+      },
+      {
+        usage: rollingPreviousUsage,
+        cost: rollingPreviousCost,
+        averageDaily: round2(rollingPreviousUsage / Math.max(1, previous28.length || 28)),
+        readingsCount: previous28.length || 28,
+        period: previous28.length > 0 ? 'Previous 28 Days' : 'Previous Month (Same Day Cutoff)'
+      },
+      {
+        current: 'Last 28 Days',
+        previous: previous28.length > 0 ? 'Previous 28 Days' : 'Previous Month (Same Day Cutoff)'
+      }
+    )
 
-      const currentPeriod = calculatePeriodData(currentPeriodReadings, 'Last 28 days')
-      const previousPeriod = calculatePeriodData(previousPeriodReadings, 'Previous 28 days')
+    const comparisons =
+      comparisonType === 'all'
+        ? [mom, yoy, rolling28]
+        : comparisonType === 'YoY'
+          ? yoy
+          : comparisonType === 'Rolling28'
+            ? rolling28
+            : mom
 
-      comparisons.push({
-        comparisonType: 'Rolling28',
-        currentPeriod,
-        previousPeriod,
-        percentageChange: calculatePercentageChange(currentPeriod, previousPeriod),
-        absoluteChange: calculateAbsoluteChange(currentPeriod, previousPeriod),
-        trend: determineTrend(currentPeriod.usage, previousPeriod.usage)
-      })
-    }
-
-    // Generate summary insights
-    const insights = generateComparisonInsights(comparisons)
+    const comparisonList = Array.isArray(comparisons) ? comparisons : [comparisons]
+    const insights = generateComparisonInsights(comparisonList)
 
     return NextResponse.json({
       success: true,
       data: {
-        comparisons: comparisonType === 'all' ? comparisons : comparisons[0],
+        timeframeLabels: stats.timeframeLabels,
+        comparisons,
         insights,
         metadata: {
           generatedAt: new Date().toISOString(),
           meterId: meterId || 'all',
-          comparisonType
+          comparisonType,
+          notes: ['MoM uses MTD vs previous month same-day cutoff from unified stats service.']
         }
       }
     })
-
   } catch (error) {
     console.error('Error fetching comparison analytics:', error)
     return NextResponse.json(
@@ -183,79 +244,4 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     )
   }
-}
-
-function calculatePeriodData(readings: any[], period: string): PeriodData {
-  const totalUsage = readings.reduce((sum, r) => sum + (r.usage || 0), 0)
-  const totalCost = readings.reduce((sum, r) => sum + (r.estimatedCost || 0), 0)
-  const readingsCount = readings.length
-  
-  // Calculate active days (unique dates)
-  const uniqueDates = new Set(readings.map(r => r.date.toISOString().split('T')[0]))
-  const activeDays = uniqueDates.size || 1
-
-  return {
-    usage: Math.round(totalUsage * 100) / 100,
-    cost: Math.round(totalCost * 100) / 100,
-    averageDaily: Math.round((totalUsage / activeDays) * 100) / 100,
-    readingsCount,
-    period
-  }
-}
-
-function calculatePercentageChange(current: PeriodData, previous: PeriodData) {
-  const usageChange = previous.usage > 0 ? 
-    ((current.usage - previous.usage) / previous.usage) * 100 : 0
-  const costChange = previous.cost > 0 ? 
-    ((current.cost - previous.cost) / previous.cost) * 100 : 0
-
-  return {
-    usage: Math.round(usageChange * 100) / 100,
-    cost: Math.round(costChange * 100) / 100
-  }
-}
-
-function calculateAbsoluteChange(current: PeriodData, previous: PeriodData) {
-  return {
-    usage: Math.round((current.usage - previous.usage) * 100) / 100,
-    cost: Math.round((current.cost - previous.cost) * 100) / 100
-  }
-}
-
-function determineTrend(currentValue: number, previousValue: number): 'increasing' | 'decreasing' | 'stable' {
-  const changePercent = previousValue > 0 ? ((currentValue - previousValue) / previousValue) * 100 : 0
-  
-  if (changePercent > 5) return 'increasing'
-  if (changePercent < -5) return 'decreasing'
-  return 'stable'
-}
-
-function generateComparisonInsights(comparisons: ComparisonResult[]) {
-  const insights = []
-
-  for (const comparison of comparisons) {
-    const { comparisonType, percentageChange, trend } = comparison
-
-    if (Math.abs(percentageChange.usage) > 20) {
-      insights.push({
-        type: trend === 'increasing' ? 'warning' : 'success',
-        title: `${comparisonType} Usage ${trend === 'increasing' ? 'Increase' : 'Decrease'}`,
-        message: `Your usage ${trend === 'increasing' ? 'increased' : 'decreased'} by ${Math.abs(percentageChange.usage).toFixed(1)}% compared to the previous period.`,
-        priority: Math.abs(percentageChange.usage) > 30 ? 'high' : 'medium',
-        comparisonType
-      })
-    }
-
-    if (Math.abs(percentageChange.cost) > 25) {
-      insights.push({
-        type: trend === 'increasing' ? 'warning' : 'success',
-        title: `${comparisonType} Cost ${trend === 'increasing' ? 'Increase' : 'Savings'}`,
-        message: `Your electricity cost ${trend === 'increasing' ? 'increased' : 'decreased'} by ${Math.abs(percentageChange.cost).toFixed(1)}% compared to the previous period.`,
-        priority: Math.abs(percentageChange.cost) > 40 ? 'high' : 'medium',
-        comparisonType
-      })
-    }
-  }
-
-  return insights
 }

@@ -1,141 +1,69 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import { authOptions } from '../../auth/[...nextauth]/route'
-import prisma from '@/lib/prisma'
-import { computeMTD, forecastUsage } from '@/lib/analytics'
+import { authOptions } from '@/lib/authOptions'
+import { computeStatsBundle } from '@/lib/statService'
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100
+}
 
 export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
-    
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const { searchParams } = new URL(request.url)
     const meterId = searchParams.get('meterId')
-    
-    const currentDate = new Date()
-    const currentMonth = currentDate.getMonth() + 1
-    const currentYear = currentDate.getFullYear()
-    const daysInMonth = new Date(currentYear, currentMonth, 0).getDate()
 
-    // Build query conditions for current month
-    const whereConditions: any = {
-      userId: session.user.id,
-      month: currentMonth,
-      year: currentYear
-    }
+    const stats = await computeStatsBundle(session.user.id, meterId || undefined)
+    const dailyAverageUsage =
+      stats.window.daysElapsed > 0 ? stats.mtd.usage_kwh / stats.window.daysElapsed : 0
 
-    if (meterId) {
-      whereConditions.meterId = meterId
-    }
+    const expectedUsage = stats.forecast.usage_kwh
+    const lowUsage =
+      stats.forecast.method === 'actual' ? expectedUsage : Math.max(0, expectedUsage * 0.9)
+    const highUsage =
+      stats.forecast.method === 'actual' ? expectedUsage : expectedUsage * 1.1
 
-    // Fetch current month readings
-    const readings = await prisma.meterReading.findMany({
-      where: whereConditions,
-      include: {
-        meter: {
-          select: {
-            id: true,
-            label: true,
-            type: true
-          }
-        }
-      },
-      orderBy: {
-        date: 'asc'
-      }
-    })
-
-    // Transform readings for analytics
-    const analyticsReadings = readings.map(reading => ({
-      id: reading.id,
-      date: reading.date,
-      usage: reading.usage || 0,
-      estimatedCost: reading.estimatedCost || 0,
-      week: reading.week,
-      month: reading.month,
-      year: reading.year
-    }))
-
-    // Calculate MTD and forecast
-    const mtd = computeMTD(analyticsReadings)
-    const forecast = forecastUsage(mtd.usage, mtd.daysElapsed, daysInMonth)
-
-    // Get historical data for comparison (last 3 months)
-    const historicalReadings = await prisma.meterReading.findMany({
-      where: {
-        userId: session.user.id,
-        ...(meterId && { meterId }),
-        OR: [
-          { month: currentMonth - 1, year: currentYear },
-          { month: currentMonth - 2, year: currentYear },
-          { month: currentMonth - 3, year: currentYear },
-          // Handle year boundary
-          ...(currentMonth <= 3 ? [
-            { month: 12 + currentMonth - 1, year: currentYear - 1 },
-            { month: 12 + currentMonth - 2, year: currentYear - 1 },
-            { month: 12 + currentMonth - 3, year: currentYear - 1 }
-          ] : [])
-        ]
-      },
-      select: {
-        usage: true,
-        month: true,
-        year: true
-      }
-    })
-
-    // Calculate historical averages
-    const monthlyTotals = new Map<string, number>()
-    historicalReadings.forEach(reading => {
-      const key = `${reading.year}-${reading.month}`
-      const current = monthlyTotals.get(key) || 0
-      monthlyTotals.set(key, current + (reading.usage || 0))
-    })
-
-    const historicalAverage = monthlyTotals.size > 0 ? 
-      Array.from(monthlyTotals.values()).reduce((sum, val) => sum + val, 0) / monthlyTotals.size : 0
-
-    // Calculate confidence level based on data quality
-    const confidenceLevel = Math.min(100, Math.max(50, 
-      (mtd.daysElapsed / daysInMonth) * 100 + 
-      (readings.length > 0 ? 20 : 0) + 
-      (historicalAverage > 0 ? 15 : 0)
-    ))
+    const prevSamePeriodUsage = round2(
+      stats.mtd.usage_kwh - stats.mtd.vs_prev_same_period.delta_kwh
+    )
 
     return NextResponse.json({
       success: true,
       data: {
-        forecast,
-        monthToDate: {
-          usage: mtd.usage,
-          cost: mtd.cost,
-          daysElapsed: mtd.daysElapsed
+        timeframeLabels: stats.timeframeLabels,
+        forecast: {
+          low: round2(lowUsage),
+          expected: expectedUsage,
+          high: round2(highUsage),
+          method: stats.forecast.method
         },
-        period: {
-          month: currentMonth,
-          year: currentYear,
-          daysInMonth,
-          meterId: meterId || 'all'
+        monthToDate: {
+          usage: stats.mtd.usage_kwh,
+          cost: stats.mtd.cost_pkr,
+          daysElapsed: stats.window.daysElapsed,
+          averageDailyUsage: round2(dailyAverageUsage)
         },
         comparison: {
-          historicalAverage: Math.round(historicalAverage * 100) / 100,
-          vsHistorical: historicalAverage > 0 ? 
-            Math.round(((forecast.expected - historicalAverage) / historicalAverage) * 100) : null
+          previousMonthSamePeriodUsage: prevSamePeriodUsage,
+          vsPreviousMonthSamePeriodPct: stats.mtd.vs_prev_same_period.pct_kwh
         },
-        confidence: {
-          level: Math.round(confidenceLevel),
-          factors: {
-            dataPoints: readings.length,
-            daysElapsed: mtd.daysElapsed,
-            hasHistorical: historicalAverage > 0
+        period: {
+          month: stats.window.now.getMonth() + 1,
+          year: stats.window.now.getFullYear(),
+          daysInMonth: stats.window.daysInMonth,
+          meterId: meterId || 'all',
+          labels: {
+            mtd: stats.timeframeLabels.mtd,
+            previousSamePeriod: 'Previous Month (Same Day Cutoff)',
+            forecast: stats.timeframeLabels.forecast
           }
         }
       }
     })
-
   } catch (error) {
     console.error('Error generating usage forecast:', error)
     return NextResponse.json(

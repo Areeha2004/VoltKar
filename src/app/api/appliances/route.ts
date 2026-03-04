@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import { authOptions } from '../auth/[...nextauth]/route'
+import { authOptions } from '@/lib/authOptions'
 import prisma from '@/lib/prisma'
 import { 
   calculateEstimatedKwh, 
   calculateContributions, 
-  calculateApplianceCost,
+  allocateAppliancePortfolioCosts,
   validateApplianceData,
   getEfficiencyRating,
   generateOptimizationSuggestions
 } from '@/lib/applianceCalculations'
+import { computeStatsBundle } from '@/lib/statService'
+import { computeApplianceAttribution } from '@/lib/applianceAttribution'
 
 export async function GET(request: NextRequest) {
   try {
@@ -39,6 +41,7 @@ export async function GET(request: NextRequest) {
         createdAt: 'desc'
       }
     })
+    const stats = await computeStatsBundle(session.user.id)
 
     // Transform appliances for response
     const appliancesData = appliances.map(appliance => ({
@@ -54,10 +57,36 @@ export async function GET(request: NextRequest) {
       createdAt: appliance.createdAt
     }))
 
-    // Calculate estimated costs using tariff engine
+    const portfolio = allocateAppliancePortfolioCosts(
+      appliancesData.map(appliance => ({
+        id: appliance.id,
+        estimatedKwh: appliance.estimatedKwh || 0
+      }))
+    )
+    const allocationById = new Map(
+      portfolio.allocations.map(item => [item.id, item])
+    )
+    const attribution = computeApplianceAttribution(
+      appliancesData.map(appliance => ({
+        id: appliance.id,
+        estimatedKwh: appliance.estimatedKwh || 0
+      })),
+      {
+        mtdUsageKwh: stats.mtd.usage_kwh,
+        mtdCostPkr: stats.mtd.cost_pkr,
+        forecastUsageKwh: stats.forecast.usage_kwh,
+        forecastCostPkr: stats.forecast.cost_pkr,
+        daysElapsed: stats.window.daysElapsed,
+        daysInMonth: stats.window.daysInMonth
+      }
+    )
+
+    // Cost model: household bill allocated by appliance share (no per-appliance fixed-charge multiplication)
     const appliancesWithCosts = appliancesData.map(appliance => {
-      const estimatedCost = calculateApplianceCost(appliance.estimatedKwh || 0)
-      const costPerKwh = appliance.estimatedKwh > 0 ? estimatedCost / appliance.estimatedKwh : 0
+      const allocation = allocationById.get(appliance.id)
+      const attributionMetrics = attribution.byId[appliance.id]
+      const estimatedCost = allocation?.estimatedCost || 0
+      const costPerKwh = allocation?.costPerKwh || 0
       const efficiency = getEfficiencyRating(
         appliance.wattage,
         appliance.hoursPerDay,
@@ -67,8 +96,15 @@ export async function GET(request: NextRequest) {
 
       return {
         ...appliance,
-        estimatedCost: Math.round(estimatedCost),
+        estimatedCost,
         costPerKwh: Math.round(costPerKwh * 100) / 100,
+        costSharePct: allocation?.sharePct || 0,
+        usageSharePct: attributionMetrics?.usageSharePct || 0,
+        billSharePct: attributionMetrics?.billSharePct || 0,
+        attributedUsageMtdKwh: attributionMetrics?.attributedMtdUsageKwh || 0,
+        attributedCostMtdPkr: attributionMetrics?.attributedMtdCostPkr || 0,
+        attributedUsageForecastKwh: attributionMetrics?.attributedForecastUsageKwh || 0,
+        attributedCostForecastPkr: attributionMetrics?.attributedForecastCostPkr || 0,
         efficiency,
         ...(includeOptimizations && {
           optimizationSuggestions: generateOptimizationSuggestions(appliance)
@@ -78,7 +114,7 @@ export async function GET(request: NextRequest) {
 
     // Calculate summary statistics
     const totalKwh = appliancesWithCosts.reduce((sum, app) => sum + (app.estimatedKwh || 0), 0)
-    const totalCost = appliancesWithCosts.reduce((sum, app) => sum + app.estimatedCost, 0)
+    const totalCost = portfolio.totalCost
     const averageEfficiency = appliancesWithCosts.length > 0 ? 
       appliancesWithCosts.filter(app => app.efficiency === 'excellent' || app.efficiency === 'good').length / appliancesWithCosts.length * 100 : 0
 
@@ -89,9 +125,18 @@ export async function GET(request: NextRequest) {
         summary: {
           totalAppliances: appliances.length,
           totalKwh: Math.round(totalKwh * 100) / 100,
-          totalCost: Math.round(totalCost),
+          totalCost: Math.round(totalCost * 100) / 100,
           averageEfficiency: Math.round(averageEfficiency),
-          categories: [...new Set(appliances.map(a => a.category))]
+          categories: [...new Set(appliances.map(a => a.category))],
+          costModel: 'household_allocated',
+          meter: {
+            mtdUsageKwh: stats.mtd.usage_kwh,
+            mtdCostPkr: stats.mtd.cost_pkr,
+            forecastUsageKwh: stats.forecast.usage_kwh,
+            forecastCostPkr: stats.forecast.cost_pkr,
+            timeframeLabels: stats.timeframeLabels
+          },
+          consistency: attribution.consistency
         }
       }
     })
@@ -163,8 +208,36 @@ export async function POST(request: NextRequest) {
       where: { id: newAppliance.id }
     })
 
-    // Calculate cost for response
-    const estimatedCost = calculateApplianceCost(updatedAppliance?.estimatedKwh || 0)
+    const allAppliances = await prisma.appliance.findMany({
+      where: { userId: session.user.id },
+      select: { id: true, estimatedKwh: true }
+    })
+    const portfolio = allocateAppliancePortfolioCosts(
+      allAppliances.map(item => ({
+        id: item.id,
+        estimatedKwh: item.estimatedKwh || 0
+      }))
+    )
+    const allocation = portfolio.allocations.find(item => item.id === updatedAppliance?.id)
+    const stats = await computeStatsBundle(session.user.id)
+    const attribution = computeApplianceAttribution(
+      allAppliances.map(item => ({
+        id: item.id,
+        estimatedKwh: item.estimatedKwh || 0
+      })),
+      {
+        mtdUsageKwh: stats.mtd.usage_kwh,
+        mtdCostPkr: stats.mtd.cost_pkr,
+        forecastUsageKwh: stats.forecast.usage_kwh,
+        forecastCostPkr: stats.forecast.cost_pkr,
+        daysElapsed: stats.window.daysElapsed,
+        daysInMonth: stats.window.daysInMonth
+      }
+    )
+    const attributionMetrics = updatedAppliance?.id
+      ? attribution.byId[updatedAppliance.id]
+      : null
+
     const efficiency = getEfficiencyRating(
       updatedAppliance?.wattage || 0,
       updatedAppliance?.hoursPerDay || 0,
@@ -177,7 +250,14 @@ export async function POST(request: NextRequest) {
       data: {
         appliance: {
           ...updatedAppliance,
-          estimatedCost: Math.round(estimatedCost),
+          estimatedCost: allocation?.estimatedCost || 0,
+          costPerKwh: allocation?.costPerKwh || 0,
+          usageSharePct: attributionMetrics?.usageSharePct || 0,
+          billSharePct: attributionMetrics?.billSharePct || 0,
+          attributedUsageMtdKwh: attributionMetrics?.attributedMtdUsageKwh || 0,
+          attributedCostMtdPkr: attributionMetrics?.attributedMtdCostPkr || 0,
+          attributedUsageForecastKwh: attributionMetrics?.attributedForecastUsageKwh || 0,
+          attributedCostForecastPkr: attributionMetrics?.attributedForecastCostPkr || 0,
           efficiency
         }
       }

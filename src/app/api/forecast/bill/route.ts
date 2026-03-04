@@ -1,148 +1,150 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import { authOptions } from '../../auth/[...nextauth]/route'
-import prisma from '@/lib/prisma'
-import { computeMTD, forecastUsage, forecastBill } from '@/lib/analytics'
+import { authOptions } from '@/lib/authOptions'
+import { computeStatsBundle } from '@/lib/statService'
 import { tariffEngine } from '@/lib/tariffEngine'
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100
+}
 
 export async function GET(request: NextRequest) {
   try {
     const session = await getServerSession(authOptions)
-    
     if (!session?.user?.id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const { searchParams } = new URL(request.url)
     const meterId = searchParams.get('meterId')
-    
-    const currentDate = new Date()
-    const currentMonth = currentDate.getMonth() + 1
-    const currentYear = currentDate.getFullYear()
-    const daysInMonth = new Date(currentYear, currentMonth, 0).getDate()
 
-    // Build query conditions for current month
-    const whereConditions: any = {
-      userId: session.user.id,
-      month: currentMonth,
-      year: currentYear
-    }
+    const stats = await computeStatsBundle(session.user.id, meterId || undefined)
 
-    if (meterId) {
-      whereConditions.meterId = meterId
-    }
+    const expectedUsage = stats.forecast.usage_kwh
+    const expectedCost = stats.forecast.cost_pkr
+    const mtdTariff = tariffEngine(stats.mtd.usage_kwh)
+    const forecastTariff = tariffEngine(expectedUsage)
 
-    // Fetch current month readings
-    const readings = await prisma.meterReading.findMany({
-      where: whereConditions,
-      include: {
-        meter: {
-          select: {
-            id: true,
-            label: true,
-            type: true
-          }
-        }
-      },
-      orderBy: {
-        date: 'asc'
-      }
-    })
+    const lowUsage =
+      stats.forecast.method === 'actual' ? expectedUsage : Math.max(0, expectedUsage * 0.9)
+    const highUsage =
+      stats.forecast.method === 'actual' ? expectedUsage : expectedUsage * 1.1
 
-    // Transform readings for analytics
-    const analyticsReadings = readings.map(reading => ({
-      id: reading.id,
-      date: reading.date,
-      usage: reading.usage || 0,
-      estimatedCost: reading.estimatedCost || 0,
-      week: reading.week,
-      month: reading.month,
-      year: reading.year
-    }))
+    const lowCost =
+      stats.forecast.method === 'actual'
+        ? expectedCost
+        : round2(tariffEngine(lowUsage).totalCost)
+    const highCost =
+      stats.forecast.method === 'actual'
+        ? expectedCost
+        : round2(tariffEngine(highUsage).totalCost)
 
-    // Calculate MTD and forecast usage
-    const mtd = computeMTD(analyticsReadings)
-    const usageForecast = forecastUsage(mtd.usage, mtd.daysElapsed, daysInMonth)
-    
-    // Generate bill forecasts
-    const billForecast = forecastBill(usageForecast)
+    const savingsReduce10Cost = round2(tariffEngine(Math.max(0, expectedUsage * 0.9)).totalCost)
+    const savingsReduce20Cost = round2(tariffEngine(Math.max(0, expectedUsage * 0.8)).totalCost)
 
-    // Get detailed cost breakdown for expected scenario
-    const expectedBreakdown = usageForecast.expected > 0 ? 
-      tariffEngine(usageForecast.expected) : null
-
-    // Calculate current month cost so far
-    const currentMTDCost = mtd.cost
-
-    // Get last month's bill for comparison
-    const lastMonthReadings = await prisma.meterReading.findMany({
-      where: {
-        userId: session.user.id,
-        ...(meterId && { meterId }),
-        month: currentMonth === 1 ? 12 : currentMonth - 1,
-        year: currentMonth === 1 ? currentYear - 1 : currentYear
-      },
-      select: {
-        estimatedCost: true
-      }
-    })
-
-    const lastMonthTotal = lastMonthReadings.reduce((sum, reading) => 
-      sum + (reading.estimatedCost || 0), 0)
-
-    // Calculate savings potential
-    const savingsScenarios = {
-      reduce10Percent: {
-        usage: Math.round(usageForecast.expected * 0.9),
-        cost: usageForecast.expected > 0 ? tariffEngine(usageForecast.expected * 0.9).totalCost : 0
-      },
-      reduce20Percent: {
-        usage: Math.round(usageForecast.expected * 0.8),
-        cost: usageForecast.expected > 0 ? tariffEngine(usageForecast.expected * 0.8).totalCost : 0
-      }
-    }
-
-    const potentialSavings = {
-      reduce10Percent: billForecast.expected - savingsScenarios.reduce10Percent.cost,
-      reduce20Percent: billForecast.expected - savingsScenarios.reduce20Percent.cost
-    }
+    const confidence =
+      stats.forecast.method === 'actual'
+        ? 100
+        : Math.max(55, Math.min(95, Math.round((stats.window.daysElapsed / stats.window.daysInMonth) * 100)))
 
     return NextResponse.json({
       success: true,
       data: {
+        timeframeLabels: stats.timeframeLabels,
         forecast: {
-          usage: usageForecast,
-          bill: billForecast
+          usage: {
+            low: round2(lowUsage),
+            expected: expectedUsage,
+            high: round2(highUsage)
+          },
+          bill: {
+            low: round2(lowCost),
+            expected: expectedCost,
+            high: round2(highCost)
+          },
+          method: stats.forecast.method
+        },
+        slabDistribution: forecastTariff.slabBreakdown.map(slab => ({
+          range: slab.range,
+          units: round2(slab.units),
+          rate: slab.rate,
+          energyCost: round2(slab.cost),
+          unitsSharePct:
+            expectedUsage > 0 ? round2((slab.units / expectedUsage) * 100) : 0,
+          energyCostSharePct:
+            forecastTariff.energyCost > 0 ? round2((slab.cost / forecastTariff.energyCost) * 100) : 0
+        })),
+        tariff: {
+          mtd: {
+            units: mtdTariff.units,
+            energyCost: mtdTariff.energyCost,
+            fuelAdj: mtdTariff.fuelAdj,
+            fixedCharges: mtdTariff.fixedCharges,
+            tax: mtdTariff.tax,
+            tvFee: mtdTariff.tvFee,
+            totalCost: mtdTariff.totalCost
+          },
+          forecast: {
+            units: forecastTariff.units,
+            energyCost: forecastTariff.energyCost,
+            fuelAdj: forecastTariff.fuelAdj,
+            fixedCharges: forecastTariff.fixedCharges,
+            tax: forecastTariff.tax,
+            tvFee: forecastTariff.tvFee,
+            totalCost: forecastTariff.totalCost
+          }
         },
         current: {
-          mtdUsage: mtd.usage,
-          mtdCost: currentMTDCost,
-          daysElapsed: mtd.daysElapsed,
-          projectedDailyRate: mtd.daysElapsed > 0 ? mtd.usage / mtd.daysElapsed : 0
+          mtdUsage: stats.mtd.usage_kwh,
+          mtdCost: stats.mtd.cost_pkr,
+          daysElapsed: stats.window.daysElapsed,
+          projectedDailyRate:
+            stats.window.daysElapsed > 0
+              ? round2(stats.mtd.usage_kwh / stats.window.daysElapsed)
+              : 0
         },
-        breakdown: expectedBreakdown,
         comparison: {
-          lastMonthBill: Math.round(lastMonthTotal),
-          vsLastMonth: lastMonthTotal > 0 ? 
-            Math.round(((billForecast.expected - lastMonthTotal) / lastMonthTotal) * 100) : null,
-          difference: Math.round(billForecast.expected - lastMonthTotal)
+          lastMonthBill: stats.prevMonthFull.cost_pkr,
+          vsLastMonth: stats.forecast.vs_prev_full.pct_cost,
+          difference: stats.forecast.vs_prev_full.delta_cost
         },
         savings: {
-          scenarios: savingsScenarios,
+          scenarios: {
+            reduce10Percent: {
+              usage: round2(expectedUsage * 0.9),
+              cost: savingsReduce10Cost
+            },
+            reduce20Percent: {
+              usage: round2(expectedUsage * 0.8),
+              cost: savingsReduce20Cost
+            }
+          },
           potential: {
-            reduce10Percent: Math.round(potentialSavings.reduce10Percent),
-            reduce20Percent: Math.round(potentialSavings.reduce20Percent)
+            reduce10Percent: round2(expectedCost - savingsReduce10Cost),
+            reduce20Percent: round2(expectedCost - savingsReduce20Cost)
+          }
+        },
+        confidence: {
+          level: confidence,
+          factors: {
+            method: stats.forecast.method,
+            daysElapsed: stats.window.daysElapsed,
+            daysInMonth: stats.window.daysInMonth
           }
         },
         period: {
-          month: currentMonth,
-          year: currentYear,
-          daysInMonth,
-          meterId: meterId || 'all'
+          month: stats.window.now.getMonth() + 1,
+          year: stats.window.now.getFullYear(),
+          daysInMonth: stats.window.daysInMonth,
+          meterId: meterId || 'all',
+          labels: {
+            mtd: stats.timeframeLabels.mtd,
+            previousMonth: stats.timeframeLabels.prevMonthFull,
+            forecast: stats.timeframeLabels.forecast
+          }
         }
       }
     })
-
   } catch (error) {
     console.error('Error generating bill forecast:', error)
     return NextResponse.json(

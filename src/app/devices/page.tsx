@@ -1,145 +1,220 @@
 'use client'
-import React, { useState, useEffect } from 'react'
-import { 
-  Lightbulb, 
-  Plus, 
-  Settings, 
-  Zap, 
-  Clock, 
-  Thermometer,
-  DollarSign,
-  TrendingUp,
-  Edit,
-  Trash2,
-  Save,
-  Brain,
-  Target,
+
+import React, { useEffect, useMemo, useState } from 'react'
+import {
   Activity,
-  Sparkles,
+  Brain,
+  Calculator,
   ChevronDown,
   ChevronUp,
-  Power,
-  Timer,
-  X,
-  Calculator,
-  PieChart,
-  BarChart3
+  DollarSign,
+  Edit,
+  Lightbulb,
+  Plus,
+  RefreshCw,
+  Settings,
+  Target,
+  Trash2,
+  Zap,
 } from 'lucide-react'
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts'
+
 import Navbar from '../../components/layout/Navbar'
 import Sidebar from '../../components/layout/Sidebar'
 import Card from '../../components/ui/Card'
 import Button from '../../components/ui/Button'
 import Input from '../../components/ui/Input'
-import { useAppliances } from '../../hooks/useAppliances'
+import { Appliance, useAppliances } from '../../hooks/useAppliances'
 import { useApplianceCategories } from '../../hooks/useApplianceCategories'
-import { PieChart as RechartsPieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts'
+import { calculateApplianceCost } from '../../lib/applianceCalculations'
+
+const CHART_COLORS = ['#00d4aa', '#38bdf8', '#22d3ee', '#f59e0b', '#f97316', '#ef4444', '#8b5cf6']
+
+type ApplianceFormState = {
+  name: string
+  category: string
+  type: string
+  wattage: string
+  hoursPerDay: string
+  daysPerMonth: string
+}
+
+const defaultForm: ApplianceFormState = {
+  name: '',
+  category: '',
+  type: 'Non-Inverter',
+  wattage: '',
+  hoursPerDay: '',
+  daysPerMonth: '30',
+}
+
+const efficiencyTone = (efficiency: string) => {
+  if (efficiency === 'excellent') return 'text-emerald-300 bg-emerald-500/10 border-emerald-500/25'
+  if (efficiency === 'good') return 'text-cyan-300 bg-cyan-500/10 border-cyan-500/25'
+  if (efficiency === 'fair') return 'text-amber-300 bg-amber-500/10 border-amber-500/25'
+  return 'text-red-300 bg-red-500/10 border-red-500/25'
+}
+
+const categoryBadge = (category: string) =>
+  category
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase() || 'AP'
 
 const DevicesPage: React.FC = () => {
-  const { appliances, summary, loading, error, createAppliance, updateAppliance, deleteAppliance, refetch } = useAppliances(true)
+  const { appliances, summary, loading, error, createAppliance, updateAppliance, deleteAppliance, refetch } =
+    useAppliances(true)
   const { metadata, getWattageGuide, getUsageGuide, getTypicalValues } = useApplianceCategories()
-  
-  const [showAddForm, setShowAddForm] = useState(false)
+
+  const [showForm, setShowForm] = useState(false)
   const [editingDevice, setEditingDevice] = useState<string | null>(null)
   const [expandedDevice, setExpandedDevice] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
+  const [formData, setFormData] = useState<ApplianceFormState>(defaultForm)
 
-  // Form state
-  const [formData, setFormData] = useState({
-    name: '',
-    category: '',
-    type: 'Non-Inverter',
-    wattage: '',
-    hoursPerDay: '',
-    daysPerMonth: '30'
-  })
-
-  // Live preview calculation
-  const calculatePreview = () => {
-    const wattage = parseFloat(formData.wattage) || 0
-    const hours = parseFloat(formData.hoursPerDay) || 0
-    const days = parseInt(formData.daysPerMonth) || 30
-    
-    if (wattage <= 0 || hours <= 0 || days <= 0) return { kWh: 0, cost: 0 }
-    
-    let estimatedKwh = (wattage * hours * days) / 1000
-    
-    // Apply inverter efficiency
-    if (formData.type === 'Inverter') {
-      estimatedKwh *= 0.7
-    }
-    
-    // Rough cost estimate (Rs 20/kWh average)
-    const estimatedCost = estimatedKwh * 20
-    
-    return {
-      kWh: Math.round(estimatedKwh * 100) / 100,
-      cost: Math.round(estimatedCost)
-    }
-  }
-
-  const preview = calculatePreview()
-
-  // Run only when category changes
-useEffect(() => {
-  if (formData.category && metadata) {
+  useEffect(() => {
+    if (!formData.category || !metadata) return
     const typical = getTypicalValues(formData.category)
+    const defaultWattage = typical.wattage > 0 ? String(typical.wattage) : ''
+    const defaultHours = typical.hoursPerDay > 0 ? String(typical.hoursPerDay) : ''
 
-    setFormData(prev => ({
-      ...prev,
-      wattage: prev.wattage || typical.wattage.toString(),
-      hoursPerDay: prev.hoursPerDay || typical.hoursPerDay.toString(),
-    }))
-  }
-}, [formData.category, metadata, getTypicalValues])
+    setFormData((prev) => {
+      const nextWattage = prev.wattage || defaultWattage
+      const nextHours = prev.hoursPerDay || defaultHours
+      if (nextWattage === prev.wattage && nextHours === prev.hoursPerDay) return prev
+      return { ...prev, wattage: nextWattage, hoursPerDay: nextHours }
+    })
+  }, [formData.category, metadata, getTypicalValues])
+
+  const preview = useMemo(() => {
+    const wattage = Number(formData.wattage || 0)
+    const hours = Number(formData.hoursPerDay || 0)
+    const days = Number(formData.daysPerMonth || 0)
+    if (
+      !Number.isFinite(wattage) ||
+      !Number.isFinite(hours) ||
+      !Number.isFinite(days) ||
+      wattage <= 0 ||
+      hours <= 0 ||
+      days <= 0
+    ) {
+      return { kwh: 0, cost: 0 }
+    }
+
+    let estimatedKwh = (wattage * hours * days) / 1000
+    if (formData.type === 'Inverter') estimatedKwh *= 0.7
+
+    return {
+      kwh: Math.round(estimatedKwh * 100) / 100,
+      cost: Math.round(calculateApplianceCost(estimatedKwh)),
+    }
+  }, [formData])
+
+  const forecastLabel = summary?.meter?.timeframeLabels?.forecast || 'Forecast'
+  const meterSummary = summary?.meter
+  const consistency = summary?.consistency
+  const categoryOptions = metadata?.categories || []
+  const typeOptions = metadata?.types?.length ? metadata.types : ['Non-Inverter', 'Inverter']
+
+  const chartData = useMemo(
+    () =>
+      appliances
+        .map((appliance) => ({
+          name: appliance.name,
+          usageShare: Number(appliance.usageSharePct ?? appliance.contribution ?? 0),
+          billShare: Number(appliance.billSharePct ?? appliance.contribution ?? 0),
+          attributedCost: Number(appliance.attributedCostForecastPkr ?? 0),
+          attributedKwh: Number(appliance.attributedUsageForecastKwh ?? 0),
+        }))
+        .filter((item) => item.usageShare > 0 || item.attributedCost > 0),
+    [appliances]
+  )
 
   const resetForm = () => {
-    setFormData({
-      name: '',
-      category: '',
-      type: 'Non-Inverter',
-      wattage: '',
-      hoursPerDay: '',
-      daysPerMonth: '30'
-    })
+    setFormData(defaultForm)
     setFormError(null)
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    
+  const openAddForm = () => {
+    resetForm()
+    setEditingDevice(null)
+    setShowForm(true)
+  }
+
+  const openEditForm = (appliance: Appliance) => {
+    setFormData({
+      name: appliance.name || '',
+      category: appliance.category || '',
+      type: appliance.type || 'Non-Inverter',
+      wattage: String(appliance.wattage || ''),
+      hoursPerDay: String(appliance.hoursPerDay || ''),
+      daysPerMonth: String(appliance.daysPerMonth || '30'),
+    })
+    setEditingDevice(appliance.id)
+    setShowForm(true)
+    setFormError(null)
+  }
+
+  const closeForm = () => {
+    setShowForm(false)
+    setEditingDevice(null)
+    resetForm()
+  }
+
+  const submitForm = async (event: React.FormEvent) => {
+    event.preventDefault()
+    setFormError(null)
+
     if (!formData.name.trim() || !formData.category || !formData.wattage || !formData.hoursPerDay) {
-      setFormError('Please fill in all required fields')
+      setFormError('Please fill in all required fields.')
+      return
+    }
+
+    const payload = {
+      name: formData.name.trim(),
+      category: formData.category,
+      type: formData.type,
+      wattage: Number(formData.wattage),
+      hoursPerDay: Number(formData.hoursPerDay),
+      daysPerMonth: Number(formData.daysPerMonth || 30),
+    }
+
+    if (
+      !Number.isFinite(payload.wattage) ||
+      !Number.isFinite(payload.hoursPerDay) ||
+      !Number.isFinite(payload.daysPerMonth) ||
+      payload.wattage <= 0 ||
+      payload.hoursPerDay <= 0 ||
+      payload.daysPerMonth <= 0
+    ) {
+      setFormError('Wattage, hours/day, and days/month must be valid positive numbers.')
       return
     }
 
     try {
       setSubmitting(true)
-      setFormError(null)
-      
       if (editingDevice) {
-        await updateAppliance(editingDevice, {
-          name: formData.name.trim(),
-          category: formData.category,
-          type: formData.type,
-          wattage: parseFloat(formData.wattage),
-          hoursPerDay: parseFloat(formData.hoursPerDay),
-          daysPerMonth: parseInt(formData.daysPerMonth)
-        })
-        setEditingDevice(null)
+        await updateAppliance(editingDevice, payload)
       } else {
-        await createAppliance({
-          name: formData.name.trim(),
-          category: formData.category,
-          type: formData.type,
-          wattage: parseFloat(formData.wattage),
-          hoursPerDay: parseFloat(formData.hoursPerDay),
-          daysPerMonth: parseInt(formData.daysPerMonth)
-        })
+        await createAppliance(payload)
       }
-      
-      resetForm()
-      setShowAddForm(false)
+      closeForm()
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to save appliance')
     } finally {
@@ -147,82 +222,51 @@ useEffect(() => {
     }
   }
 
-  const handleEdit = (appliance: any) => {
-    setFormData({
-      name: appliance.name,
-      category: appliance.category,
-      type: appliance.type,
-      wattage: appliance.wattage.toString(),
-      hoursPerDay: appliance.hoursPerDay.toString(),
-      daysPerMonth: appliance.daysPerMonth.toString()
-    })
-    setEditingDevice(appliance.id)
-    setShowAddForm(true)
-  }
+  const removeAppliance = async (applianceId: string, applianceName: string) => {
+    const confirmed = window.confirm(`Delete appliance "${applianceName}"?`)
+    if (!confirmed) return
 
-  const handleDelete = async (id: string, name: string) => {
-    if (window.confirm(`Are you sure you want to delete "${name}"?`)) {
-      try {
-        await deleteAppliance(id)
-      } catch (err) {
-        alert('Failed to delete appliance')
-      }
+    try {
+      await deleteAppliance(applianceId)
+    } catch {
+      window.alert('Failed to delete appliance.')
     }
   }
 
-  const getEfficiencyColor = (efficiency: string) => {
-    switch (efficiency) {
-      case 'excellent': return 'text-primary bg-primary/10'
-      case 'good': return 'text-accent-blue bg-accent-blue/10'
-      case 'fair': return 'text-accent-amber bg-accent-amber/10'
-      case 'poor': return 'text-red-500 bg-red-500/10'
-      default: return 'text-foreground-secondary bg-background-secondary'
+  const refreshPage = async () => {
+    try {
+      setRefreshing(true)
+      await refetch()
+    } finally {
+      setRefreshing(false)
     }
   }
 
-  const getCategoryIcon = (category: string) => {
-    switch (category.toLowerCase()) {
-      case 'air conditioner': return '❄️'
-      case 'refrigerator': return '🧊'
-      case 'lighting': return '💡'
-      case 'fan': return '🌀'
-      case 'water heater': return '🚿'
-      case 'washing machine': return '🧺'
-      case 'microwave': return '📱'
-      case 'television': return '📺'
-      case 'computer': return '💻'
-      case 'iron': return '🔥'
-      default: return '⚡'
-    }
-  }
+  const sortedAppliances = useMemo(
+    () => [...appliances].sort((a, b) => Number(b.estimatedCost || 0) - Number(a.estimatedCost || 0)),
+    [appliances]
+  )
 
-  // Prepare chart data
-  const chartData = appliances.map(appliance => ({
-    name: appliance.name,
-    value: appliance.contribution || 0,
-    cost: appliance.estimatedCost || 0,
-    kWh: appliance.estimatedKwh || 0,
-    color: `hsl(${Math.random() * 360}, 70%, 60%)`
-  })).filter(item => item.value > 0)
-
-  const COLORS = ['#00d4aa', '#3b82f6', '#8b5cf6', '#f59e0b', '#ec4899', '#10b981', '#06b6d4']
+  const totalKwh = Number(
+    summary?.totalKwh || appliances.reduce((acc, item) => acc + Number(item.estimatedKwh || 0), 0)
+  )
+  const totalCost = Number(
+    summary?.totalCost || appliances.reduce((acc, item) => acc + Number(item.estimatedCost || 0), 0)
+  )
+  const averageEfficiencyRaw = Number(summary?.averageEfficiency || 0)
+  const averageEfficiency =
+    averageEfficiencyRaw > 0 ? (averageEfficiencyRaw <= 1 ? averageEfficiencyRaw * 100 : averageEfficiencyRaw) : 0
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen bg-background text-foreground">
         <Navbar />
         <div className="flex">
           <Sidebar />
-          <main className="flex-1 p-8">
-            <div className="max-w-7xl mx-auto">
-              <div className="animate-pulse space-y-8">
-                <div className="h-8 bg-background-card rounded w-1/3"></div>
-                <div className="grid md:grid-cols-4 gap-6">
-                  {[1, 2, 3, 4].map(i => (
-                    <div key={i} className="h-32 bg-background-card rounded-2xl"></div>
-                  ))}
-                </div>
-              </div>
+          <main className="flex flex-1 items-center justify-center px-6">
+            <div className="flex flex-col items-center gap-4">
+              <div className="h-12 w-12 animate-spin rounded-full border-2 border-cyan-300/30 border-t-cyan-300" />
+              <p className="text-sm text-foreground-secondary">Loading device workspace...</p>
             </div>
           </main>
         </div>
@@ -231,700 +275,527 @@ useEffect(() => {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Background Effects */}
-      <div className="fixed inset-0 mesh-gradient pointer-events-none opacity-20" />
-      <div className="fixed inset-0 bg-[radial-gradient(circle_at_80%_20%,rgba(139,92,246,0.1),transparent_50%)] pointer-events-none" />
-      
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute -left-20 top-0 h-80 w-80 rounded-full bg-cyan-500/12 blur-[120px]" />
+        <div className="absolute right-0 top-1/4 h-80 w-80 rounded-full bg-primary/15 blur-[130px]" />
+      </div>
+
       <Navbar />
-      
-      <div className="flex">
+
+      <div className="relative flex">
         <Sidebar />
-        
-        <main className="flex-1 p-8">
-          <div className="max-w-7xl mx-auto space-y-8">
-            {/* Header */}
-            <div className="flex items-center justify-between animate-fade-in">
-              <div className="space-y-3">
-                <div className="flex items-center space-x-3">
-                  <div className="bg-gradient-to-r from-accent-purple to-accent-pink p-3 rounded-2xl">
-                    <Lightbulb className="h-8 w-8 text-white" />
-                  </div>
-                  <div>
-                    <h1 className="text-4xl font-bold text-foreground font-sora">Smart Device Manager</h1>
-                    <p className="text-xl text-foreground-secondary">AI-powered appliance optimization and control center</p>
-                  </div>
+
+        <main className="flex-1 px-4 pb-10 pt-6 md:px-8">
+          <div className="mx-auto max-w-6xl space-y-6">
+            <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-[#0a1323]/95 via-[#0f1a2d]/95 to-[#081220]/95 p-6 shadow-premium md:p-8">
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+                <div className="space-y-2">
+                  <p className="text-xs uppercase tracking-[0.22em] text-foreground-tertiary">Devices</p>
+                  <h1 className="font-sora text-3xl font-bold md:text-4xl">Appliance Intelligence Hub</h1>
+                  <p className="max-w-2xl text-sm text-foreground-secondary md:text-base">
+                    Build a clean device profile, estimate monthly consumption, and track what drives your bill.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <Button
+                    variant="outline"
+                    onClick={() => void refreshPage()}
+                    disabled={refreshing}
+                    className="border-white/15 bg-white/[0.03] text-foreground"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                    {refreshing ? 'Refreshing...' : 'Refresh'}
+                  </Button>
+                  <Button onClick={openAddForm}>
+                    <Plus className="h-4 w-4" />
+                    Add Device
+                  </Button>
                 </div>
               </div>
-              <div className="flex items-center space-x-4">
-                <Button variant="outline">
-                  <Brain className="h-5 w-5 mr-2" />
-                  Auto-Optimize All
-                </Button>
-                <Button 
-                  className="premium-button"
-                  onClick={() => {
-                    resetForm()
-                    setShowAddForm(true)
-                  }}
-                >
-                  <Plus className="h-5 w-5 mr-2" />
-                  Add Device
-                </Button>
-              </div>
-            </div>
+            </section>
 
-            {/* Overview Cards */}
-            <div className="grid md:grid-cols-4 gap-6">
+            {error && (
+              <section className="rounded-2xl border border-red-500/25 bg-red-500/10 p-4 text-red-100">
+                <p className="text-sm">{error}</p>
+              </section>
+            )}
+
+            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               {[
                 {
                   title: 'Total Devices',
-                  value: (summary?.totalAppliances || 0).toString(),
-                  icon: Zap,
-                  gradient: 'from-primary to-accent-cyan',
-                  description: 'Connected appliances'
-                },
-                {
-                  title: 'Monthly Cost',
-                  value: `Rs ${(summary?.totalCost || 0).toLocaleString()}`,
-                  icon: DollarSign,
-                  gradient: 'from-accent-blue to-accent-purple',
-                  description: 'Current projection'
-                },
-                {
-                  title: 'Energy Usage',
-                  value: `${(summary?.totalKwh || 0).toFixed(0)} kWh`,
+                  value: String(summary?.totalAppliances || appliances.length),
+                  helper: 'Tracked appliances',
                   icon: Activity,
-                  gradient: 'from-accent-amber to-accent-pink',
-                  description: 'This month'
                 },
                 {
-                  title: 'Efficiency Score',
-                  value: `${summary?.averageEfficiency || 0}%`,
+                  title: 'Estimated Usage',
+                  value: `${totalKwh.toFixed(1)} kWh`,
+                  helper: 'Monthly projection',
+                  icon: Zap,
+                },
+                {
+                  title: 'Estimated Cost',
+                  value: `Rs ${Math.round(totalCost).toLocaleString()}`,
+                  helper: forecastLabel,
+                  icon: DollarSign,
+                },
+                {
+                  title: 'Efficiency Index',
+                  value: averageEfficiency > 0 ? `${averageEfficiency.toFixed(0)}%` : 'N/A',
+                  helper: 'Portfolio average',
                   icon: Target,
-                  gradient: 'from-accent-emerald to-primary',
-                  description: 'Above average'
-                }
-              ].map((metric, index) => (
-                <Card key={index} className="card-premium animate-fade-in" ><div style={{ animationDelay: `${index * 0.1}s` }}>
-  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="relative">
-                        <div className={`absolute inset-0 bg-gradient-to-r ${metric.gradient} rounded-2xl blur-xl opacity-20`} />
-                        <div className={`relative bg-gradient-to-r ${metric.gradient} p-3 rounded-2xl`}>
-                          <metric.icon className="h-6 w-6 text-white" />
-                        </div>
-                      </div>
+                },
+              ].map((item) => (
+                <Card key={item.title} className="border border-white/10 bg-[#0f1727]/75">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.16em] text-foreground-tertiary">{item.title}</p>
+                      <p className="mt-2 font-sora text-2xl font-semibold">{item.value}</p>
+                      <p className="mt-2 text-xs text-foreground-secondary">{item.helper}</p>
                     </div>
-                    <div className="space-y-1">
-                      <p className="text-foreground-secondary text-sm font-medium">{metric.title}</p>
-                      <p className="text-2xl font-bold text-foreground font-mono">{metric.value}</p>
-                      <p className="text-xs text-foreground-muted">{metric.description}</p>
-                    </div>
+                    <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03]">
+                      <item.icon className="h-5 w-5 text-cyan-200" />
+                    </span>
                   </div>
-                  </div>
-                
                 </Card>
               ))}
-            </div>
+            </section>
 
-            {/* Add/Edit Appliance Form */}
-            {showAddForm && (
-              <Card className="card-premium">
-                <form onSubmit={handleSubmit} className="space-y-6">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      <div className="bg-gradient-to-r from-primary to-accent-cyan p-2 rounded-xl">
-                        <Plus className="h-6 w-6 text-white" />
-                      </div>
-                      <div>
-                        <h2 className="text-2xl font-semibold text-foreground font-sora">
-                          {editingDevice ? 'Edit Appliance' : 'Add New Appliance'}
-                        </h2>
-                        <p className="text-foreground-secondary">Configure your appliance details</p>
-                      </div>
-                    </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={() => {
-                        setShowAddForm(false)
-                        setEditingDevice(null)
-                        resetForm()
-                      }}
-                    >
-                      <X className="h-5 w-5" />
-                    </Button>
+            {(meterSummary || consistency) && (
+              <section className="rounded-2xl border border-cyan-500/25 bg-cyan-500/10 p-5">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.14em] text-cyan-100/80">Meter MTD</p>
+                    <p className="mt-1 text-lg font-semibold text-cyan-50">
+                      {Math.round(Number(meterSummary?.mtdUsageKwh || 0)).toLocaleString()} kWh
+                    </p>
                   </div>
-
-                  <div className="grid md:grid-cols-2 gap-8">
-                    <div className="space-y-6">
-                      <Input
-                        label="Appliance Name *"
-                        placeholder="e.g., Living Room AC"
-                        value={formData.name}
-                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                        required
-                      />
-
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium text-foreground-secondary">Category *</label>
-                        <select
-                          value={formData.category}
-                          onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                          className="input-field w-full"
-                          required
-                        >
-                          <option value="">Select Category</option>
-                          {metadata?.categories.map(category => (
-                            <option key={category} value={category}>{category}</option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="space-y-2">
-                        <label className="text-sm font-medium text-foreground-secondary">Type *</label>
-                        <select
-                          value={formData.type}
-                          onChange={(e) => setFormData({ ...formData, type: e.target.value })}
-                          className="input-field w-full"
-                          required
-                        >
-                          {metadata?.types.map(type => (
-                            <option key={type} value={type}>{type}</option>
-                          ))}
-                        </select>
-                        {formData.type === 'Inverter' && (
-                          <p className="text-xs text-primary">✨ 30% more efficient than non-inverter</p>
-                        )}
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4">
-                        <Input
-                          label="Power Rating (Watts) *"
-                          type="number"
-                          placeholder="1500"
-                          value={formData.wattage}
-                          onChange={(e) => setFormData({ ...formData, wattage: e.target.value })}
-                          min="1"
-                          max="10000"
-                          required
-                        />
-                        <Input
-                          label="Hours per Day *"
-                          type="number"
-                          placeholder="8"
-                          value={formData.hoursPerDay}
-                          onChange={(e) => setFormData({ ...formData, hoursPerDay: e.target.value })}
-                          min="0.1"
-                          max="24"
-                          step="0.1"
-                          required
-                        />
-                      </div>
-
-                      <Input
-                        label="Days per Month"
-                        type="number"
-                        placeholder="30"
-                        value={formData.daysPerMonth}
-                        onChange={(e) => setFormData({ ...formData, daysPerMonth: e.target.value })}
-                        min="1"
-                        max="31"
-                      />
-                    </div>
-
-                    <div className="space-y-6">
-                      {/* Live Preview */}
-                      <div className="p-6 rounded-2xl bg-gradient-to-br from-primary/10 to-accent-cyan/10 border border-primary/20">
-                        <div className="space-y-4">
-                          <div className="flex items-center space-x-2">
-                            <Calculator className="h-5 w-5 text-primary" />
-                            <h3 className="font-semibold text-primary">Live Preview</h3>
-                          </div>
-                          <div className="grid grid-cols-2 gap-4">
-                            <div className="text-center p-3 rounded-xl bg-background-card/50">
-                              <p className="text-sm text-foreground-secondary">Estimated kWh</p>
-                              <p className="text-2xl font-bold text-foreground">{preview.kWh}</p>
-                              <p className="text-xs text-foreground-tertiary">per month</p>
-                            </div>
-                            <div className="text-center p-3 rounded-xl bg-background-card/50">
-                              <p className="text-sm text-foreground-secondary">Estimated Cost</p>
-                              <p className="text-2xl font-bold text-primary">Rs {preview.cost.toLocaleString()}</p>
-                              <p className="text-xs text-foreground-tertiary">per month</p>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Category Guidelines */}
-                      {formData.category && metadata && (
-                        <div className="p-4 rounded-2xl bg-background-card/30 border border-border/30">
-                          <h4 className="font-medium text-foreground mb-3">Typical Values for {formData.category}</h4>
-                          <div className="space-y-2 text-sm">
-                            {(() => {
-                              const wattageGuide = getWattageGuide(formData.category)
-                              const usageGuide = getUsageGuide(formData.category)
-                              return (
-                                <>
-                                  {wattageGuide && (
-                                    <div className="flex justify-between">
-                                      <span className="text-foreground-secondary">Power Range:</span>
-                                      <span className="text-foreground">{wattageGuide.min}-{wattageGuide.max}W</span>
-                                    </div>
-                                  )}
-                                  {usageGuide && (
-                                    <div className="flex justify-between">
-                                      <span className="text-foreground-secondary">Usage Range:</span>
-                                      <span className="text-foreground">{usageGuide.min}-{usageGuide.max}h/day</span>
-                                    </div>
-                                  )}
-                                </>
-                              )
-                            })()}
-                          </div>
-                        </div>
-                      )}
-
-                      {formError && (
-                        <div className="p-4 rounded-2xl bg-red-500/10 border border-red-500/20">
-                          <p className="text-red-400 text-sm">{formError}</p>
-                        </div>
-                      )}
-                    </div>
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.14em] text-cyan-100/80">{forecastLabel}</p>
+                    <p className="mt-1 text-lg font-semibold text-cyan-50">
+                      Rs {Math.round(Number(meterSummary?.forecastCostPkr || 0)).toLocaleString()}
+                    </p>
                   </div>
-
-                  <div className="flex justify-end space-x-4 pt-6 border-t border-border/30">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => {
-                        setShowAddForm(false)
-                        setEditingDevice(null)
-                        resetForm()
-                      }}
-                      disabled={submitting}
-                    >
-                      Cancel
-                    </Button>
-                    <Button type="submit" disabled={submitting}>
-                      <Save className="h-5 w-5 mr-2" />
-                      {submitting ? 'Saving...' : editingDevice ? 'Update Appliance' : 'Add Appliance'}
-                    </Button>
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.14em] text-cyan-100/80">Model Delta</p>
+                    <p className="mt-1 text-lg font-semibold text-cyan-50">
+                      {Number(consistency?.forecastDeltaPct || 0).toFixed(1)}%
+                    </p>
                   </div>
-                </form>
-              </Card>
+                </div>
+              </section>
             )}
 
-            {/* Contribution Charts */}
-            {appliances.length > 0 && (
-              <div className="grid lg:grid-cols-2 gap-8">
-                {/* Pie Chart - Contribution Breakdown */}
-                <Card className="card-premium">
-                  <div className="space-y-6">
-                    <div className="flex items-center space-x-3">
-                      <div className="bg-gradient-to-r from-accent-purple to-accent-pink p-2 rounded-xl">
-                        <PieChart className="h-6 w-6 text-white" />
+            <section className="grid gap-6 xl:grid-cols-3">
+              <div className="xl:col-span-2">
+                <Card className="border border-white/10 bg-[#0f1727]/75">
+                  {showForm ? (
+                    <form onSubmit={submitForm} className="space-y-6">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <h2 className="font-sora text-xl font-semibold">
+                            {editingDevice ? 'Edit Appliance' : 'Add Appliance'}
+                          </h2>
+                          <p className="text-sm text-foreground-secondary">
+                            Enter realistic usage values for better optimization outputs.
+                          </p>
+                        </div>
+                        <Button type="button" variant="outline" onClick={closeForm}>
+                          Cancel
+                        </Button>
                       </div>
-                      <div>
-                        <h2 className="text-xl font-semibold text-foreground font-sora">Usage Contribution</h2>
-                        <p className="text-foreground-secondary">Percentage breakdown by appliance</p>
-                      </div>
-                    </div>
-                    
-                    <div className="h-64">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <RechartsPieChart>
-                          <Pie
-                            data={chartData}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={60}
-                            outerRadius={100}
-                            paddingAngle={5}
-                            dataKey="value"
+
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <Input
+                          label="Appliance Name"
+                          value={formData.name}
+                          onChange={(event) =>
+                            setFormData((prev) => ({ ...prev, name: event.target.value }))
+                          }
+                          placeholder="e.g. Bedroom AC"
+                          required
+                        />
+                        <div className="space-y-3">
+                          <label className="text-sm font-medium text-foreground-secondary">Category</label>
+                          <select
+                            value={formData.category}
+                            onChange={(event) =>
+                              setFormData((prev) => ({ ...prev, category: event.target.value }))
+                            }
+                            className="input-field w-full"
+                            required
                           >
-                            {chartData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                            <option value="">Select category</option>
+                            {categoryOptions.map((category) => (
+                              <option key={category} value={category}>
+                                {category}
+                              </option>
                             ))}
-                          </Pie>
-                          <Tooltip 
-                            contentStyle={{ 
-                              backgroundColor: '#141417', 
-                              border: '1px solid #2a2a30',
-                              borderRadius: '12px',
-                              color: '#ffffff'
-                            }}
-                            formatter={(value: any, name: string) => [`${value}%`, 'Contribution']}
-                          />
-                        </RechartsPieChart>
-                      </ResponsiveContainer>
-                    </div>
-                    
-                    <div className="space-y-2">
-                      {chartData.map((item, index) => (
-                        <div key={index} className="flex items-center justify-between p-3 rounded-xl bg-background-card/30">
-                          <div className="flex items-center space-x-3">
-                            <div 
-                              className="w-4 h-4 rounded-full" 
-                              style={{ backgroundColor: COLORS[index % COLORS.length] }} 
-                            />
-                            <span className="text-foreground">{item.name}</span>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-4 md:grid-cols-4">
+                        <div className="space-y-3">
+                          <label className="text-sm font-medium text-foreground-secondary">Type</label>
+                          <select
+                            value={formData.type}
+                            onChange={(event) =>
+                              setFormData((prev) => ({ ...prev, type: event.target.value }))
+                            }
+                            className="input-field w-full"
+                            required
+                          >
+                            {typeOptions.map((type) => (
+                              <option key={type} value={type}>
+                                {type}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <Input
+                          type="number"
+                          label="Wattage"
+                          value={formData.wattage}
+                          onChange={(event) =>
+                            setFormData((prev) => ({ ...prev, wattage: event.target.value }))
+                          }
+                          min="1"
+                          step="1"
+                          placeholder="1200"
+                          required
+                        />
+                        <Input
+                          type="number"
+                          label="Hours / Day"
+                          value={formData.hoursPerDay}
+                          onChange={(event) =>
+                            setFormData((prev) => ({ ...prev, hoursPerDay: event.target.value }))
+                          }
+                          min="0.1"
+                          step="0.1"
+                          placeholder="8"
+                          required
+                        />
+                        <Input
+                          type="number"
+                          label="Days / Month"
+                          value={formData.daysPerMonth}
+                          onChange={(event) =>
+                            setFormData((prev) => ({ ...prev, daysPerMonth: event.target.value }))
+                          }
+                          min="1"
+                          step="1"
+                          placeholder="30"
+                          required
+                        />
+                      </div>
+
+                      <div className="grid gap-4 lg:grid-cols-2">
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                          <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+                            <Calculator className="h-4 w-4 text-cyan-200" />
+                            Live Preview
                           </div>
-                          <div className="text-right">
-                            <p className="font-semibold text-foreground">{item.value}%</p>
-                            <p className="text-sm text-foreground-secondary">{item.kWh} kWh</p>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                              <p className="text-xs text-foreground-tertiary">Estimated Usage</p>
+                              <p className="mt-1 text-lg font-semibold text-foreground">
+                                {preview.kwh.toFixed(2)} kWh
+                              </p>
+                            </div>
+                            <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                              <p className="text-xs text-foreground-tertiary">Estimated Cost</p>
+                              <p className="mt-1 text-lg font-semibold text-emerald-300">
+                                Rs {preview.cost.toLocaleString()}
+                              </p>
+                            </div>
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  </div>
-                </Card>
 
-                {/* Bar Chart - Cost Breakdown */}
-                <Card className="card-premium">
-                  <div className="space-y-6">
-                    <div className="flex items-center space-x-3">
-                      <div className="bg-gradient-to-r from-accent-amber to-accent-pink p-2 rounded-xl">
-                        <BarChart3 className="h-6 w-6 text-white" />
+                        <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                          <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+                            <Settings className="h-4 w-4 text-cyan-200" />
+                            Category Guide
+                          </div>
+                          {formData.category ? (
+                            <div className="space-y-2 text-sm">
+                              <p className="text-foreground-secondary">
+                                Wattage:{' '}
+                                <span className="text-foreground">
+                                  {getWattageGuide(formData.category)?.min ?? 0}-
+                                  {getWattageGuide(formData.category)?.max ?? 0}W
+                                </span>
+                              </p>
+                              <p className="text-foreground-secondary">
+                                Usage:{' '}
+                                <span className="text-foreground">
+                                  {getUsageGuide(formData.category)?.min ?? 0}-
+                                  {getUsageGuide(formData.category)?.max ?? 0} hrs/day
+                                </span>
+                              </p>
+                            </div>
+                          ) : (
+                            <p className="text-sm text-foreground-secondary">
+                              Select a category to view recommended usage ranges.
+                            </p>
+                          )}
+                        </div>
                       </div>
-                      <div>
-                        <h2 className="text-xl font-semibold text-foreground font-sora">Cost Breakdown</h2>
-                        <p className="text-foreground-secondary">Monthly cost by appliance</p>
-                      </div>
+
+                      {formError && (
+                        <div className="rounded-xl border border-red-500/25 bg-red-500/10 p-3 text-sm text-red-100">
+                          {formError}
+                        </div>
+                      )}
+
+                      <Button type="submit" disabled={submitting}>
+                        {submitting ? 'Saving...' : editingDevice ? 'Update Device' : 'Save Device'}
+                      </Button>
+                    </form>
+                  ) : (
+                    <div className="rounded-2xl border border-dashed border-white/15 bg-white/[0.02] p-6 text-sm text-foreground-secondary">
+                      <p className="text-foreground">
+                        Device editor is hidden to keep the interface clean.
+                      </p>
+                      <p className="mt-1">Use Add Device to register a new appliance or edit an existing one.</p>
                     </div>
-                    
-                    <div className="h-64">
+                  )}
+                </Card>
+              </div>
+
+              <Card className="border border-white/10 bg-[#0f1727]/75">
+                <div className="mb-4 flex items-center justify-between">
+                  <div>
+                    <h2 className="font-sora text-xl font-semibold">Load Distribution</h2>
+                    <p className="text-xs text-foreground-secondary">Share of portfolio by usage and bill</p>
+                  </div>
+                  <Brain className="h-5 w-5 text-cyan-200" />
+                </div>
+
+                {chartData.length > 0 ? (
+                  <div className="space-y-5">
+                    <div className="h-52">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={chartData}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#2a2a30" />
-                          <XAxis 
-                            dataKey="name" 
-                            stroke="#6b6b7d" 
-                            fontSize={12}
-                            angle={-45}
-                            textAnchor="end"
-                            height={80}
-                          />
-                          <YAxis stroke="#6b6b7d" />
-                          <Tooltip 
-                            contentStyle={{ 
-                              backgroundColor: '#141417', 
-                              border: '1px solid #2a2a30',
+                          <CartesianGrid strokeDasharray="3 3" stroke="rgba(148, 163, 184, 0.12)" />
+                          <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} />
+                          <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} />
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: '#0f172a',
+                              border: '1px solid rgba(148,163,184,0.25)',
                               borderRadius: '12px',
-                              color: '#ffffff'
                             }}
-                            formatter={(value: any) => [`Rs ${value}`, 'Monthly Cost']}
                           />
-                          <Bar 
-                            dataKey="cost" 
-                            fill="#00d4aa" 
-                            radius={[4, 4, 0, 0]}
-                          />
+                          <Bar dataKey="usageShare" radius={[8, 8, 0, 0]}>
+                            {chartData.map((entry, index) => (
+                              <Cell
+                                key={`usage-${entry.name}-${index}`}
+                                fill={CHART_COLORS[index % CHART_COLORS.length]}
+                              />
+                            ))}
+                          </Bar>
                         </BarChart>
                       </ResponsiveContainer>
                     </div>
-                  </div>
-                </Card>
-              </div>
-            )}
 
-            {/* Appliances List */}
-            <div className="space-y-6">
-              <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-semibold text-foreground font-sora">Your Appliances</h2>
-                <div className="flex items-center space-x-2 text-sm text-foreground-secondary">
-                  <div className="flex items-center space-x-2">
-                    <div className="w-2 h-2 bg-primary rounded-full" />
-                    <span>Excellent</span>
+                    <div className="h-56">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={chartData}
+                            dataKey="attributedCost"
+                            nameKey="name"
+                            cx="50%"
+                            cy="50%"
+                            innerRadius={50}
+                            outerRadius={75}
+                            paddingAngle={3}
+                          >
+                            {chartData.map((entry, index) => (
+                              <Cell
+                                key={`cost-${entry.name}-${index}`}
+                                fill={CHART_COLORS[index % CHART_COLORS.length]}
+                              />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: '#0f172a',
+                              border: '1px solid rgba(148,163,184,0.25)',
+                              borderRadius: '12px',
+                            }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-2 h-2 bg-accent-blue rounded-full" />
-                    <span>Good</span>
+                ) : (
+                  <div className="rounded-2xl border border-dashed border-white/15 bg-white/[0.02] p-5 text-sm text-foreground-secondary">
+                    Add at least one appliance to generate distribution charts.
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-2 h-2 bg-accent-amber rounded-full" />
-                    <span>Fair</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <div className="w-2 h-2 bg-red-500 rounded-full" />
-                    <span>Poor</span>
-                  </div>
-                </div>
-              </div>
+                )}
+              </Card>
+            </section>
 
-              {appliances.length > 0 ? (
-                <div className="space-y-4">
-                  {appliances.map((appliance, index) => (
-                    <Card key={appliance.id} className="card-premium transition-all duration-500 animate-fade-in" > <div style={{ animationDelay: `${index * 0.1}s` }}>
- <div className="space-y-6">
-                        {/* Appliance Header */}
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-4">
-                            <div className="relative">
-                              <div className="text-4xl p-2">{getCategoryIcon(appliance.category)}</div>
-                              <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-background ${
-                                appliance.efficiency === 'excellent' ? 'bg-primary' : 
-                                appliance.efficiency === 'good' ? 'bg-accent-blue' :
-                                appliance.efficiency === 'fair' ? 'bg-accent-amber' : 'bg-red-500'
-                              }`} />
-                            </div>
-                            <div className="space-y-2">
-                              <div className="flex items-center space-x-3">
-                                <h3 className="text-2xl font-semibold text-foreground font-sora">{appliance.name}</h3>
-                                <span className={`px-3 py-1 rounded-full text-xs font-medium ${getEfficiencyColor(appliance.efficiency)}`}>
-                                  {appliance.efficiency}
+            <section className="grid gap-6 xl:grid-cols-3">
+              <div className="xl:col-span-2">
+                <Card className="border border-white/10 bg-[#0f1727]/75">
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <h2 className="font-sora text-xl font-semibold">Device Inventory</h2>
+                      <p className="text-xs text-foreground-secondary">No duplicates. One clean card per appliance.</p>
+                    </div>
+                    <span className="rounded-full border border-white/15 px-2.5 py-1 text-xs text-foreground-secondary">
+                      {sortedAppliances.length} items
+                    </span>
+                  </div>
+
+                  <div className="space-y-3">
+                    {sortedAppliances.length > 0 ? (
+                      sortedAppliances.map((appliance) => {
+                        const isExpanded = expandedDevice === appliance.id
+                        return (
+                          <article key={appliance.id} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                              <div className="flex min-w-0 items-start gap-3">
+                                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/15 bg-white/[0.04] text-xs font-bold text-cyan-200">
+                                  {categoryBadge(appliance.category)}
                                 </span>
+                                <div className="min-w-0">
+                                  <p className="truncate text-sm font-semibold text-foreground">{appliance.name}</p>
+                                  <p className="text-xs text-foreground-tertiary">
+                                    {appliance.category} | {appliance.type}
+                                  </p>
+                                  <span
+                                    className={`mt-2 inline-flex rounded-full border px-2 py-0.5 text-[11px] ${efficiencyTone(appliance.efficiency)}`}
+                                  >
+                                    {appliance.efficiency || 'unknown'}
+                                  </span>
+                                </div>
                               </div>
-                              <div className="flex items-center space-x-6 text-sm text-foreground-secondary">
-                                <div className="flex items-center space-x-1">
-                                  <span className="font-medium">{appliance.category}</span>
-                                  <span>•</span>
-                                  <span>{appliance.type}</span>
+
+                              <div className="grid grid-cols-2 gap-3 text-sm md:min-w-[260px]">
+                                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                                  <p className="text-xs text-foreground-tertiary">kWh / month</p>
+                                  <p className="mt-1 font-semibold text-foreground">
+                                    {Number(appliance.estimatedKwh || 0).toFixed(2)}
+                                  </p>
                                 </div>
-                                <div className="flex items-center space-x-1">
-                                  <Power className="h-4 w-4" />
-                                  <span>{appliance.wattage}W</span>
-                                </div>
-                                <div className="flex items-center space-x-1">
-                                  <Timer className="h-4 w-4" />
-                                  <span>{appliance.hoursPerDay}h/day</span>
+                                <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3">
+                                  <p className="text-xs text-foreground-tertiary">Cost / month</p>
+                                  <p className="mt-1 font-semibold text-emerald-300">
+                                    Rs {Math.round(Number(appliance.estimatedCost || 0)).toLocaleString()}
+                                  </p>
                                 </div>
                               </div>
                             </div>
-                          </div>
-                          
-                          <div className="flex items-center space-x-6">
-                            <div className="text-right space-y-1">
-                              <p className="text-2xl font-bold text-foreground font-mono">Rs {appliance.estimatedCost.toLocaleString()}</p>
-                              <p className="text-sm text-foreground-secondary">{appliance.estimatedKwh} kWh/month</p>
-                              <p className="text-xs text-primary font-medium">{appliance.contribution}% of total</p>
-                            </div>
-                            <div className="flex items-center space-x-2">
-                              <Button 
-                                variant="ghost" 
-                                size="sm"
-                                onClick={() => handleEdit(appliance)}
-                                className="hover:bg-background-card"
-                              >
+
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              <Button variant="outline" size="sm" onClick={() => openEditForm(appliance)}>
                                 <Edit className="h-4 w-4" />
+                                Edit
                               </Button>
-                              <Button 
-                                variant="ghost" 
+                              <Button
+                                variant="outline"
                                 size="sm"
-                                onClick={() => handleDelete(appliance.id, appliance.name)}
-                                className="hover:bg-red-500/10 text-red-500"
+                                onClick={() => void removeAppliance(appliance.id, appliance.name)}
+                                className="border-red-500/30 text-red-200 hover:bg-red-500/10"
                               >
                                 <Trash2 className="h-4 w-4" />
+                                Delete
                               </Button>
-                              <Button 
-                                variant="ghost" 
+                              <Button
+                                variant="ghost"
                                 size="sm"
-                                onClick={() => setExpandedDevice(expandedDevice === appliance.id ? null : appliance.id)}
-                                className="hover:bg-background-card"
+                                onClick={() =>
+                                  setExpandedDevice((prev) => (prev === appliance.id ? null : appliance.id))
+                                }
                               >
-                                {expandedDevice === appliance.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                                {isExpanded ? 'Hide Details' : 'More Details'}
                               </Button>
                             </div>
-                          </div>
-                        </div>
 
-                        {/* Expanded Details */}
-                        {expandedDevice === appliance.id && (
-                          <div className="space-y-6 p-6 rounded-2xl bg-gradient-to-br from-background-card/30 to-background-secondary/30 border border-border/30">
-                            {/* Usage Breakdown */}
-                            <div className="grid md:grid-cols-3 gap-6">
-                              <div className="p-4 rounded-2xl bg-background-card/50">
-                                <div className="space-y-2">
-                                  <div className="flex items-center space-x-2">
-                                    <Zap className="h-4 w-4 text-primary" />
-                                    <span className="font-medium text-foreground">Power Details</span>
-                                  </div>
-                                  <div className="space-y-1 text-sm">
-                                    <div className="flex justify-between">
-                                      <span className="text-foreground-secondary">Wattage:</span>
-                                      <span className="font-semibold text-foreground">{appliance.wattage}W</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                      <span className="text-foreground-secondary">Daily Hours:</span>
-                                      <span className="font-semibold text-foreground">{appliance.hoursPerDay}h</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                      <span className="text-foreground-secondary">Monthly Days:</span>
-                                      <span className="font-semibold text-foreground">{appliance.daysPerMonth}</span>
-                                    </div>
-                                  </div>
+                            {isExpanded && (
+                              <div className="mt-4 grid gap-3 rounded-xl border border-white/10 bg-white/[0.02] p-4 text-sm md:grid-cols-2">
+                                <div>
+                                  <p className="text-xs uppercase tracking-[0.12em] text-foreground-tertiary">
+                                    Operation Profile
+                                  </p>
+                                  <p className="mt-2 text-foreground-secondary">
+                                    {Number(appliance.wattage || 0).toLocaleString()}W x{' '}
+                                    {Number(appliance.hoursPerDay || 0).toFixed(1)}h/day x{' '}
+                                    {Number(appliance.daysPerMonth || 0).toFixed(0)} days
+                                  </p>
+                                  <p className="mt-1 text-foreground-secondary">
+                                    Usage Share: {Number(appliance.usageSharePct ?? appliance.contribution ?? 0).toFixed(1)}%
+                                  </p>
                                 </div>
-                              </div>
-
-                              <div className="p-4 rounded-2xl bg-background-card/50">
-                                <div className="space-y-2">
-                                  <div className="flex items-center space-x-2">
-                                    <Activity className="h-4 w-4 text-accent-blue" />
-                                    <span className="font-medium text-foreground">Consumption</span>
-                                  </div>
-                                  <div className="space-y-1 text-sm">
-                                    <div className="flex justify-between">
-                                      <span className="text-foreground-secondary">Monthly kWh:</span>
-                                      <span className="font-semibold text-foreground">{appliance.estimatedKwh}</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                      <span className="text-foreground-secondary">Daily kWh:</span>
-                                      <span className="font-semibold text-foreground">{(appliance.estimatedKwh / 30).toFixed(2)}</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                      <span className="text-foreground-secondary">Contribution:</span>
-                                      <span className="font-semibold text-primary">{appliance.contribution}%</span>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="p-4 rounded-2xl bg-background-card/50">
-                                <div className="space-y-2">
-                                  <div className="flex items-center space-x-2">
-                                    <DollarSign className="h-4 w-4 text-accent-amber" />
-                                    <span className="font-medium text-foreground">Cost Analysis</span>
-                                  </div>
-                                  <div className="space-y-1 text-sm">
-                                    <div className="flex justify-between">
-                                      <span className="text-foreground-secondary">Monthly Cost:</span>
-                                      <span className="font-semibold text-primary">Rs {appliance.estimatedCost.toLocaleString()}</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                      <span className="text-foreground-secondary">Daily Cost:</span>
-                                      <span className="font-semibold text-foreground">Rs {Math.round(appliance.estimatedCost / 30)}</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                      <span className="text-foreground-secondary">Cost/kWh:</span>
-                                      <span className="font-semibold text-foreground">Rs {appliance.costPerKwh}</span>
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Optimization Suggestions */}
-                            {appliance.optimizationSuggestions && appliance.optimizationSuggestions.length > 0 && (
-                              <div className="space-y-4">
-                                <h4 className="font-semibold text-foreground flex items-center space-x-2">
-                                  <Brain className="h-5 w-5 text-accent-purple" />
-                                  <span>AI Optimization Recommendations</span>
-                                </h4>
-                                <div className="grid md:grid-cols-1 gap-3">
-                                  {appliance.optimizationSuggestions.map((suggestion, idx) => (
-                                    <div key={idx} className="p-4 rounded-2xl bg-background-card/50 border border-border/50 space-y-2">
-                                      <div className="flex items-center space-x-2">
-                                        <Sparkles className="h-4 w-4 text-accent-amber" />
-                                        <span className="text-xs font-medium text-accent-amber">Smart Tip</span>
-                                      </div>
-                                      <p className="text-sm text-foreground-secondary leading-relaxed">{suggestion}</p>
-                                    </div>
-                                  ))}
+                                <div>
+                                  <p className="text-xs uppercase tracking-[0.12em] text-foreground-tertiary">
+                                    Recommendations
+                                  </p>
+                                  {appliance.optimizationSuggestions && appliance.optimizationSuggestions.length > 0 ? (
+                                    <ul className="mt-2 space-y-1 text-foreground-secondary">
+                                      {appliance.optimizationSuggestions.slice(0, 3).map((tip) => (
+                                        <li key={`${appliance.id}-${tip}`} className="flex items-start gap-2">
+                                          <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0 text-cyan-200" />
+                                          <span>{tip}</span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  ) : (
+                                    <p className="mt-2 text-foreground-secondary">
+                                      Keep this profile updated with actual usage for smarter recommendations.
+                                    </p>
+                                  )}
                                 </div>
                               </div>
                             )}
-                          </div>
-                        )}
+                          </article>
+                        )
+                      })
+                    ) : (
+                      <div className="rounded-2xl border border-dashed border-white/15 bg-white/[0.02] p-5 text-sm text-foreground-secondary">
+                        No appliances added yet. Start by adding your largest energy consumers.
                       </div>
-                      </div>
-                     
-                    </Card>
-                  ))}
-                </div>
-              ) : (
-                <Card className="text-center py-16">
-                  <div className="space-y-6">
-                    <div className="bg-gradient-to-r from-primary/20 to-accent-cyan/20 p-6 rounded-3xl w-fit mx-auto">
-                      <Lightbulb className="h-16 w-16 text-primary mx-auto" />
-                    </div>
-                    <div className="space-y-2">
-                      <h3 className="text-2xl font-semibold text-foreground">No Appliances Added</h3>
-                      <p className="text-foreground-secondary max-w-md mx-auto">
-                        Start tracking your appliances to get detailed usage insights and optimization recommendations.
-                      </p>
-                    </div>
-                    <Button 
-                      className="premium-button"
-                      onClick={() => {
-                        resetForm()
-                        setShowAddForm(true)
-                      }}
-                    >
-                      <Plus className="h-5 w-5 mr-2" />
-                      Add Your First Appliance
-                    </Button>
+                    )}
                   </div>
                 </Card>
-              )}
-            </div>
+              </div>
 
-            {/* Overall Recommendations */}
-            {appliances.length > 0 && (
-              <Card className="card-premium">
-                <div className="space-y-6">
-                  <div className="flex items-center space-x-3">
-                    <div className="bg-gradient-to-r from-accent-emerald to-primary p-3 rounded-2xl">
-                      <TrendingUp className="h-7 w-7 text-white" />
-                    </div>
-                    <div>
-                      <h2 className="text-2xl font-semibold text-foreground font-sora">Monthly Optimization Report</h2>
-                      <p className="text-foreground-secondary">AI-powered insights and recommendations</p>
-                    </div>
+              <Card className="border border-white/10 bg-[#0f1727]/75">
+                <div className="mb-4 flex items-center gap-2">
+                  <Brain className="h-5 w-5 text-cyan-200" />
+                  <h2 className="font-sora text-xl font-semibold">Optimization Notes</h2>
+                </div>
+                <div className="space-y-3 text-sm text-foreground-secondary">
+                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                    <p className="font-semibold text-foreground">Forecast delta</p>
+                    <p className="mt-1">
+                      Device model vs meter forecast: {Number(consistency?.forecastDeltaKwh || 0).toFixed(1)} kWh (
+                      {Number(consistency?.forecastDeltaPct || 0).toFixed(1)}%).
+                    </p>
                   </div>
-                  
-                  <div className="grid md:grid-cols-3 gap-6">
-                    <div className="p-6 rounded-2xl bg-gradient-to-br from-primary/10 to-accent-cyan/10 border border-primary/20">
-                      <div className="space-y-3">
-                        <div className="flex items-center space-x-2">
-                          <DollarSign className="h-6 w-6 text-primary" />
-                          <h3 className="font-semibold text-primary text-lg">Total Monthly Cost</h3>
-                        </div>
-                        <p className="text-3xl font-bold text-foreground">Rs {(summary?.totalCost || 0).toLocaleString()}</p>
-                        <p className="text-sm text-foreground-secondary">Based on current usage patterns</p>
-                        <div className="pt-2 border-t border-border/30">
-                          <p className="text-xs text-foreground-tertiary">
-                            {summary?.totalKwh || 0} kWh total consumption
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="p-6 rounded-2xl bg-gradient-to-br from-accent-blue/10 to-accent-purple/10 border border-accent-blue/20">
-                      <div className="space-y-3">
-                        <div className="flex items-center space-x-2">
-                          <Activity className="h-6 w-6 text-accent-blue" />
-                          <h3 className="font-semibold text-accent-blue text-lg">Efficiency Score</h3>
-                        </div>
-                        <p className="text-3xl font-bold text-foreground">{summary?.averageEfficiency || 0}%</p>
-                        <p className="text-sm text-foreground-secondary">Overall appliance efficiency</p>
-                        <div className="pt-2 border-t border-border/30">
-                          <p className="text-xs text-foreground-tertiary">
-                            {appliances.filter(a => a.efficiency === 'excellent' || a.efficiency === 'good').length} of {appliances.length} appliances efficient
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="p-6 rounded-2xl bg-gradient-to-br from-accent-amber/10 to-accent-pink/10 border border-accent-amber/20">
-                      <div className="space-y-3">
-                        <div className="flex items-center space-x-2">
-                          <Target className="h-6 w-6 text-accent-amber" />
-                          <h3 className="font-semibold text-accent-amber text-lg">Categories</h3>
-                        </div>
-                        <p className="text-3xl font-bold text-foreground">{summary?.categories.length || 0}</p>
-                        <p className="text-sm text-foreground-secondary">Different appliance types</p>
-                        <div className="pt-2 border-t border-border/30">
-                          <p className="text-xs text-foreground-tertiary">
-                            {summary?.categories.join(', ') || 'No categories'}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
+                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                    <p className="font-semibold text-foreground">Calibration factor</p>
+                    <p className="mt-1">
+                      Current model factor: {Number(consistency?.calibrationFactorMtd || 0).toFixed(2)}x
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                    <p className="font-semibold text-foreground">Cleanup guidance</p>
+                    <p className="mt-1">
+                      Remove inactive appliances and keep one accurate record per device to avoid noisy forecasts.
+                    </p>
                   </div>
                 </div>
               </Card>
-            )}
+            </section>
           </div>
         </main>
       </div>

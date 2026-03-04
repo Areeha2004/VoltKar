@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useSession } from 'next-auth/react'
 
 export interface WattageGuide {
@@ -31,7 +31,7 @@ export const useApplianceCategories = () => {
   const [error, setError] = useState<string | null>(null)
   const { data: session } = useSession()
 
-  const fetchMetadata = async () => {
+  const fetchMetadata = useCallback(async () => {
     if (!session?.user?.email) return
 
     try {
@@ -50,17 +50,17 @@ export const useApplianceCategories = () => {
     } finally {
       setLoading(false)
     }
-  }
+  }, [session?.user?.email])
 
-  const getWattageGuide = (category: string): WattageGuide | null => {
+  const getWattageGuide = useCallback((category: string): WattageGuide | null => {
     return metadata?.wattageGuides[category] || null
-  }
+  }, [metadata])
 
-  const getUsageGuide = (category: string): UsageGuide | null => {
+  const getUsageGuide = useCallback((category: string): UsageGuide | null => {
     return metadata?.usageGuides[category] || null
-  }
+  }, [metadata])
 
-  const getTypicalValues = (category: string) => {
+  const getTypicalValues = useCallback((category: string) => {
     const wattageGuide = getWattageGuide(category)
     const usageGuide = getUsageGuide(category)
     
@@ -69,11 +69,11 @@ export const useApplianceCategories = () => {
       hoursPerDay: usageGuide?.typical || 0,
       daysPerMonth: 30
     }
-  }
+  }, [getWattageGuide, getUsageGuide])
 
   useEffect(() => {
     fetchMetadata()
-  }, [session?.user?.email])
+  }, [fetchMetadata])
 
   return {
     metadata,

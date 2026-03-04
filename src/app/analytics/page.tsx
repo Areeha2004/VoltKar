@@ -1,969 +1,947 @@
-'use client'
-import React, { useState, useEffect } from 'react'
-import { 
-  TrendingUp, 
-  BarChart3, 
-  DollarSign, 
-  Target, 
+"use client";
+
+import React, { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import {
   AlertTriangle,
-  CheckCircle,
-  Calendar,
-  Zap,
+  BarChart3,
   Brain,
-  Activity,
-  Clock,
-  ArrowUp,
-  ArrowDown,
-  RefreshCw,
-  Filter,
-  Download,
+  CheckCircle,
+  DollarSign,
   Lightbulb,
-  Sparkles
-} from 'lucide-react'
-import Navbar from '../../components/layout/Navbar'
-import Sidebar from '../../components/layout/Sidebar'
-import Card from '../../components/ui/Card'
-import Button from '../../components/ui/Button'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from 'recharts'
+  RefreshCw,
+  Sparkles,
+  Target,
+  TrendingUp,
+  Zap,
+} from "lucide-react";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+
+import Navbar from "../../components/layout/Navbar";
+import Sidebar from "../../components/layout/Sidebar";
+import Card from "../../components/ui/Card";
+import Button from "../../components/ui/Button";
+
+const slabColors = [
+  "#38bdf8",
+  "#22d3ee",
+  "#00d4aa",
+  "#f59e0b",
+  "#f97316",
+  "#ef4444",
+];
+
+type TabId = "overview" | "forecast" | "budget" | "anomalies" | "insights";
+
+const formatSignedPercent = (value: number) =>
+  `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
+
+const deltaTone = (value: number) =>
+  value > 0
+    ? "text-red-300"
+    : value < 0
+      ? "text-emerald-300"
+      : "text-slate-300";
+
+const alertTone = (severity: string) => {
+  if (severity === "critical" || severity === "high")
+    return "border-red-500/30 bg-red-500/10 text-red-100";
+  if (severity === "medium")
+    return "border-amber-500/30 bg-amber-500/10 text-amber-100";
+  return "border-cyan-500/30 bg-cyan-500/10 text-cyan-100";
+};
 
 const AnalyticsPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState('overview')
-  const [timeRange, setTimeRange] = useState('current-month')
-  const [selectedMeter, setSelectedMeter] = useState('all')
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
+  const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const [selectedMeter, setSelectedMeter] = useState("all");
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [aiGenerating, setAiGenerating] = useState(false);
+  const [anomalyActionLoading, setAnomalyActionLoading] = useState<
+    string | null
+  >(null);
 
-  // Data states
-  const [usageData, setUsageData] = useState<any>(null)
-  const [costData, setCostData] = useState<any>(null)
-  const [forecastData, setForecastData] = useState<any>(null)
-  const [comparisonData, setComparisonData] = useState<any>(null)
-  const [anomalies, setAnomalies] = useState<any[]>([])
-  const [insights, setInsights] = useState<any[]>([])
-  const [meters, setMeters] = useState<any[]>([])
+  const [usageData, setUsageData] = useState<any>(null);
+  const [forecastData, setForecastData] = useState<any>(null);
+  const [budgetData, setBudgetData] = useState<any>(null);
+  const [comparisonItems, setComparisonItems] = useState<any[]>([]);
+  const [insights, setInsights] = useState<any[]>([]);
+  const [anomalies, setAnomalies] = useState<any[]>([]);
+  const [alertFeed, setAlertFeed] = useState<any[]>([]);
+  const [aiPlan, setAiPlan] = useState<any>(null);
+  const [meters, setMeters] = useState<Array<{ id: string; label: string }>>(
+    [],
+  );
 
-  // Fetch all analytics data
   const fetchAnalyticsData = async () => {
     try {
-      setLoading(true)
-      
-      const [usageRes, costRes, metersRes] = await Promise.all([
-      fetch(`/api/analytics/usage${selectedMeter !== 'all' ? `?meterId=${selectedMeter}` : ''}`),
-      fetch(`/api/analytics/costs${selectedMeter !== 'all' ? `?meterId=${selectedMeter}` : ''}`),
-      fetch('/api/meters')
-    ])
+      const meterQuery =
+        selectedMeter !== "all" ? `?meterId=${selectedMeter}` : "";
+      const alertsQuery =
+        selectedMeter !== "all"
+          ? `?meterId=${selectedMeter}&limit=8`
+          : "?limit=8";
+      const [
+        usageRes,
+        costRes,
+        forecastRes,
+        budgetRes,
+        comparisonsRes,
+        anomaliesRes,
+        alertsRes,
+        metersRes,
+      ] = await Promise.all([
+        fetch(`/api/analytics/usage${meterQuery}`),
+        fetch(`/api/analytics/costs${meterQuery}`),
+        fetch(`/api/forecast/bill${meterQuery}`),
+        fetch(`/api/budget/monitor${meterQuery}`),
+        fetch(`/api/analytics/comparisons${meterQuery}`),
+        fetch(`/api/analytics/anomalies${meterQuery}`),
+        fetch(`/api/alerts/feed${alertsQuery}`),
+        fetch("/api/meters"),
+      ]);
 
-    if (usageRes.ok) {
-      const usage = await usageRes.json()
-      setUsageData({
-        monthToDateUsage: usage.data.mtd.usage_kwh,
-        monthToDateCost: usage.data.mtd.cost_pkr,
-        weeklyBreakdown: usage.data.weeklyBreakdown,
-        prevMonthUsage: usage.data.prevMonthFull.usage_kwh,
-        prevMonthCost: usage.data.prevMonthFull.cost_pkr
-      })
-    }
-
-    if (costRes.ok) {
-      const cost = await costRes.json()
-      setCostData(cost.data)
-      setForecastData({
-        forecast: {
-          usage: { expected: cost.data.forecast.usage_kwh },
-          bill: { expected: cost.data.forecast.cost_pkr }
-        },
-        comparison: { vsLastMonth: cost.data.forecast.vs_prev_full.pct_cost }
-      })
-    }
-
-      if (metersRes.ok) {
-        const metersData = await metersRes.json()
-        setMeters(metersData.meters || [])
+      if (usageRes.ok) {
+        const usagePayload = await usageRes.json();
+        setUsageData({
+          monthToDateUsage: usagePayload?.data?.mtd?.usage_kwh ?? 0,
+          monthToDateCost: usagePayload?.data?.mtd?.cost_pkr ?? 0,
+          usageChangePct:
+            usagePayload?.data?.mtd?.vs_prev_same_period?.pct_kwh ?? 0,
+          costChangePct:
+            usagePayload?.data?.mtd?.vs_prev_same_period?.pct_cost ?? 0,
+          efficiencyScore: usagePayload?.data?.mtd?.efficiency_score ?? 0,
+          efficiencyChange:
+            usagePayload?.data?.mtd?.vs_prev_same_period?.pct_efficiency ?? 0,
+          timeframeLabels: usagePayload?.data?.timeframeLabels ?? {},
+          weeklyBreakdown: usagePayload?.data?.weeklyBreakdown ?? [],
+        });
+      } else {
+        setUsageData(null);
       }
 
-      // Simulate anomaly detection
-      setAnomalies([
-        {
-          id: 1,
-          type: 'usage_spike',
-          severity: 'medium',
-          title: 'Unusual Usage Pattern',
-          description: 'Week 3 usage was 40% higher than average',
-          date: '2024-01-19',
-          impact: 'Rs 420 extra cost',
-          resolved: false
-        },
-        {
-          id: 2,
-          type: 'cost_anomaly',
-          severity: 'low',
-          title: 'Rate Calculation Variance',
-          description: 'Minor discrepancy in slab calculation detected',
-          date: '2024-01-15',
-          impact: 'Rs 15 difference',
-          resolved: true
-        }
-      ])
+      const costPayload = costRes.ok ? await costRes.json() : null;
+      const costInsights = Array.isArray(costPayload?.data?.insights)
+        ? costPayload.data.insights
+        : [];
 
+      if (forecastRes.ok) {
+        const forecastPayload = await forecastRes.json();
+        setForecastData(forecastPayload?.data ?? null);
+      } else {
+        setForecastData(null);
+      }
+
+      if (budgetRes.ok) {
+        const budgetPayload = await budgetRes.json();
+        setBudgetData(budgetPayload?.data ?? null);
+      } else {
+        setBudgetData(null);
+      }
+
+      if (comparisonsRes.ok) {
+        const comparisonsPayload = await comparisonsRes.json();
+        const comparisons = comparisonsPayload?.data?.comparisons;
+        setComparisonItems(
+          Array.isArray(comparisons)
+            ? comparisons
+            : comparisons
+              ? [comparisons]
+              : [],
+        );
+        setInsights(
+          [
+            ...(comparisonsPayload?.data?.insights || []),
+            ...costInsights,
+          ].slice(0, 8),
+        );
+      } else {
+        setComparisonItems([]);
+        setInsights(costInsights);
+      }
+
+      if (anomaliesRes.ok) {
+        const anomaliesPayload = await anomaliesRes.json();
+        setAnomalies(
+          Array.isArray(anomaliesPayload?.data?.anomalies)
+            ? anomaliesPayload.data.anomalies
+            : [],
+        );
+      } else {
+        setAnomalies([]);
+      }
+
+      if (alertsRes.ok) {
+        const alertsPayload = await alertsRes.json();
+        setAlertFeed(
+          Array.isArray(alertsPayload?.data?.alerts)
+            ? alertsPayload.data.alerts
+            : [],
+        );
+      } else {
+        setAlertFeed([]);
+      }
+
+      if (metersRes.ok) {
+        const metersPayload = await metersRes.json();
+        const nextMeters = Array.isArray(metersPayload?.meters)
+          ? metersPayload.meters.map((meter: any) => ({
+              id: meter.id,
+              label: meter.label,
+            }))
+          : [];
+        setMeters(nextMeters);
+      } else {
+        setMeters([]);
+      }
     } catch (error) {
-      console.error('Failed to fetch analytics data:', error)
+      console.error("Failed to fetch analytics data:", error);
+      setUsageData(null);
+      setForecastData(null);
+      setBudgetData(null);
+      setComparisonItems([]);
+      setInsights([]);
+      setAnomalies([]);
+      setAlertFeed([]);
+      setMeters([]);
     } finally {
-      setLoading(false)
+      setLoading(false);
+      setRefreshing(false);
     }
-  }
+  };
 
   const refreshData = async () => {
-    setRefreshing(true)
-    await fetchAnalyticsData()
-    setRefreshing(false)
-  }
+    setRefreshing(true);
+    await fetchAnalyticsData();
+  };
+
+  const generateAiSuggestions = async () => {
+    try {
+      setAiGenerating(true);
+      const body: {
+        includeAppliances: boolean;
+        meterId?: string;
+        budget?: number;
+      } = { includeAppliances: true };
+      if (selectedMeter !== "all") body.meterId = selectedMeter;
+      const budgetTarget = Number(budgetData?.budget?.target || 0);
+      if (budgetTarget > 0) body.budget = budgetTarget;
+
+      const response = await fetch("/api/optimization/suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        setAiPlan(null);
+        return;
+      }
+      const payload = await response.json();
+      setAiPlan(payload?.data?.optimization?.ai ?? null);
+    } catch (error) {
+      console.error("Failed to generate AI suggestions:", error);
+      setAiPlan(null);
+    } finally {
+      setAiGenerating(false);
+    }
+  };
+
+  const triggerAnomalyAction = async (
+    anomalyId: string,
+    action: "resolve" | "investigate",
+  ) => {
+    const key = `${action}:${anomalyId}`;
+    try {
+      setAnomalyActionLoading(key);
+      const response = await fetch("/api/analytics/anomalies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ anomalyId, action }),
+      });
+      if (response.ok) await fetchAnalyticsData();
+    } catch (error) {
+      console.error("Failed to update anomaly status:", error);
+    } finally {
+      setAnomalyActionLoading(null);
+    }
+  };
 
   useEffect(() => {
-    fetchAnalyticsData()
-  }, [timeRange, selectedMeter])
+    setAiPlan(null);
+    setLoading(true);
+    void fetchAnalyticsData();
+  }, [selectedMeter]);
 
-  // Chart data preparation
-  const weeklyChartData = usageData?.weeklyBreakdown?.map((week: any) => ({
-    week: `Week ${week.week}`,
-    usage: week.usage,
-    cost: week.cost,
-    target: 60 // Example target
-  })) || []
+  const weeklyChartData = useMemo(
+    () =>
+      (usageData?.weeklyBreakdown || []).map((week: any) => ({
+        week: `W${week.week}`,
+        usage: Number(week.usage || 0),
+        cost: Number(week.cost || 0),
+      })),
+    [usageData],
+  );
 
-  const forecastChartData = forecastData?.forecast ? [
-    { scenario: 'Low', usage: forecastData.forecast.usage?.low ?? 0, cost: forecastData.forecast.bill?.low ?? 0 },
-    { scenario: 'Expected', usage: forecastData.forecast.usage?.expected ?? 0, cost: forecastData.forecast.bill?.expected ?? 0 },
-    { scenario: 'High', usage: forecastData.forecast.usage?.high ?? 0, cost: forecastData.forecast.bill?.high ?? 0 }
-  ] : []
+  const forecastChartData = useMemo(() => {
+    const usage = forecastData?.forecast?.usage;
+    const bill = forecastData?.forecast?.bill;
+    if (!usage || !bill) return [];
+    return [
+      {
+        name: "Low",
+        usage: Number(usage.low || 0),
+        cost: Number(bill.low || 0),
+      },
+      {
+        name: "Expected",
+        usage: Number(usage.expected || 0),
+        cost: Number(bill.expected || 0),
+      },
+      {
+        name: "High",
+        usage: Number(usage.high || 0),
+        cost: Number(bill.high || 0),
+      },
+    ];
+  }, [forecastData]);
 
-  const slabDistributionData = forecastData?.forecast ? [
-    { name: 'MTD Usage', value: usageData?.monthToDateUsage || 0, cost: usageData?.monthToDateCost || 0, color: '#3b82f6' },
-    { name: 'Remaining Projected', value: Math.max(0, (forecastData.forecast.usage?.expected || 0) - (usageData?.monthToDateUsage || 0)), cost: Math.max(0, (forecastData.forecast.bill?.expected || 0) - (usageData?.monthToDateCost || 0)), color: '#8b5cf6' },
-  ].filter(item => item.value > 0) : []
+  const slabDistribution = useMemo(
+    () =>
+      (forecastData?.slabDistribution || []).map(
+        (item: any, index: number) => ({
+          ...item,
+          color: slabColors[index % slabColors.length],
+        }),
+      ),
+    [forecastData],
+  );
 
-  const getAnomalySeverityColor = (severity: string) => {
-    switch (severity) {
-      case 'high': return 'border-l-red-500 bg-red-500/5'
-      case 'medium': return 'border-l-accent-amber bg-accent-amber/5'
-      case 'low': return 'border-l-accent-blue bg-accent-blue/5'
-      default: return 'border-l-border bg-background-secondary'
-    }
-  }
+  const budgetTarget = Number(budgetData?.budget?.target || 0);
+  const budgetSpent = Number(budgetData?.budget?.spent || 0);
+  const budgetProjected = Number(budgetData?.budget?.projected || 0);
+  const hasBudget = budgetTarget > 0;
+  const budgetSpentPct = hasBudget
+    ? Math.min(100, (budgetSpent / budgetTarget) * 100)
+    : 0;
+  const budgetProjectedPct = hasBudget
+    ? Math.min(100, (budgetProjected / budgetTarget) * 100)
+    : 0;
+  const forecastOverBudget = hasBudget && budgetProjected > budgetTarget;
+  const forecastAtRisk =
+    hasBudget && !forecastOverBudget && budgetProjected > budgetTarget * 0.9;
 
-  const getInsightIcon = (type: string) => {
-    switch (type) {
-      case 'warning': return <AlertTriangle className="h-5 w-5 text-accent-amber" />
-      case 'success': return <CheckCircle className="h-5 w-5 text-primary" />
-      case 'critical': return <AlertTriangle className="h-5 w-5 text-red-500" />
-      default: return <Lightbulb className="h-5 w-5 text-accent-blue" />
-    }
-  }
+  const tabs: Array<{
+    id: TabId;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+  }> = [
+    { id: "overview", label: "Overview", icon: BarChart3 },
+    { id: "forecast", label: "Forecast", icon: TrendingUp },
+    { id: "budget", label: "Budget", icon: Target },
+    { id: "anomalies", label: "Anomalies", icon: AlertTriangle },
+    { id: "insights", label: "Insights", icon: Brain },
+  ];
+
+  const aiRecommendations = Array.isArray(aiPlan?.recommendations)
+    ? aiPlan.recommendations
+    : [];
+  const aiWarnings = Array.isArray(aiPlan?.warnings) ? aiPlan.warnings : [];
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen bg-background text-foreground">
         <Navbar />
         <div className="flex">
           <Sidebar />
-          <main className="flex-1 p-8">
-            <div className="max-w-7xl mx-auto">
-              <div className="animate-pulse space-y-8">
-                <div className="h-8 bg-background-card rounded w-1/3"></div>
-                <div className="grid md:grid-cols-4 gap-6">
-                  {[1, 2, 3, 4].map(i => (
-                    <div key={i} className="h-32 bg-background-card rounded-2xl"></div>
-                  ))}
-                </div>
-              </div>
+          <main className="flex flex-1 items-center justify-center px-6">
+            <div className="flex flex-col items-center gap-4">
+              <div className="h-12 w-12 animate-spin rounded-full border-2 border-cyan-300/30 border-t-cyan-300" />
+              <p className="text-sm text-foreground-secondary">
+                Loading analytics...
+              </p>
             </div>
           </main>
         </div>
       </div>
-    )
+    );
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Background Effects */}
-      <div className="fixed inset-0 mesh-gradient pointer-events-none opacity-20" />
-      <div className="fixed inset-0 bg-[radial-gradient(circle_at_20%_80%,rgba(59,130,246,0.1),transparent_50%)] pointer-events-none" />
-      
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute -left-20 top-0 h-80 w-80 rounded-full bg-cyan-500/15 blur-[120px]" />
+        <div className="absolute right-0 top-1/3 h-80 w-80 rounded-full bg-primary/15 blur-[140px]" />
+      </div>
+
       <Navbar />
-      
-      <div className="flex">
+      <div className="relative flex">
         <Sidebar />
-        
-        <main className="flex-1 p-8">
-          <div className="max-w-7xl mx-auto space-y-8">
-            {/* Header */}
-            <div className="flex items-center justify-between animate-fade-in">
-              <div className="space-y-3">
-                <div className="flex items-center space-x-3">
-                  <div className="bg-gradient-to-r from-accent-blue to-accent-purple p-3 rounded-2xl">
-                    <BarChart3 className="h-8 w-8 text-white" />
+        <main className="flex-1 px-4 pb-10 pt-6 md:px-8">
+          <div className="mx-auto max-w-6xl space-y-6">
+            <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-[#0a1323]/95 via-[#0f1a2d]/95 to-[#081220]/95 p-6 shadow-premium md:p-8">
+              <div className="flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
+                <div className="space-y-2">
+                  <p className="text-xs uppercase tracking-[0.22em] text-foreground-tertiary">
+                    Analytics
+                  </p>
+                  <h1 className="font-sora text-3xl font-bold md:text-4xl">
+                    Usage Intelligence
+                  </h1>
+                  <p className="max-w-2xl text-sm text-foreground-secondary md:text-base">
+                    Cleaner trend, forecast, budget, anomaly, and AI insight
+                    flows without duplicated sections.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <div className="rounded-xl border border-white/15 bg-white/[0.03] px-3 py-2.5">
+                    <select
+                      value={selectedMeter}
+                      onChange={(e) => setSelectedMeter(e.target.value)}
+                      className="bg-transparent text-sm outline-none"
+                    >
+                      <option
+                        value="all"
+                        className="bg-background text-foreground"
+                      >
+                        All Meters
+                      </option>
+                      {meters.map((meter) => (
+                        <option
+                          key={meter.id}
+                          value={meter.id}
+                          className="bg-background text-foreground"
+                        >
+                          {meter.label}
+                        </option>
+                      ))}
+                    </select>
                   </div>
-                  <div>
-                    <h1 className="text-4xl font-bold text-foreground font-sora">Analytics & Forecasting</h1>
-                    <p className="text-xl text-foreground-secondary">Deep insights into your electricity usage patterns and costs</p>
-                  </div>
+                  <Button
+                    variant="outline"
+                    onClick={() => void refreshData()}
+                    disabled={refreshing}
+                    className="border-white/15 bg-white/[0.03] text-foreground"
+                  >
+                    <RefreshCw
+                      className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
+                    />
+                    {refreshing ? "Refreshing..." : "Refresh"}
+                  </Button>
+                  <Button
+                    onClick={() => void generateAiSuggestions()}
+                    disabled={aiGenerating}
+                  >
+                    <Brain className="h-4 w-4" />
+                    {aiGenerating ? "Generating..." : "Generate AI"}
+                  </Button>
                 </div>
               </div>
-              <div className="flex items-center space-x-4">
-                <select
-                  value={selectedMeter}
-                  onChange={(e) => setSelectedMeter(e.target.value)}
-                  className="input-field"
-                >
-                  <option value="all">All Meters</option>
-                  {meters.map(meter => (
-                    <option key={meter.id} value={meter.id}>{meter.label}</option>
-                  ))}
-                </select>
-                <Button variant="outline" onClick={refreshData} disabled={refreshing}>
-                  <RefreshCw className={`h-5 w-5 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-                  {refreshing ? 'Refreshing...' : 'Refresh'}
-                </Button>
-                <Button variant="outline">
-                  <Download className="h-5 w-5 mr-2" />
-                  Export Report
-                </Button>
-              </div>
-            </div>
+            </section>
 
-            {/* Key Metrics */}
-            <div className="grid md:grid-cols-4 gap-6">
+            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               {[
                 {
-                  title: 'MTD Usage',
-                  value: usageData?.monthToDateUsage || 0,
-                  unit: 'kWh',
-                  change: usageData?.prevMonthUsage > 0 ? Math.round(((usageData.monthToDateUsage - usageData.prevMonthUsage) / usageData.prevMonthUsage) * 100) : 0,
+                  title: "Usage MTD",
+                  value: `${Math.round(usageData?.monthToDateUsage || 0).toLocaleString()} kWh`,
+                  delta: Number(usageData?.usageChangePct || 0),
                   icon: Zap,
-                  gradient: 'from-primary to-accent-cyan'
                 },
                 {
-                  title: 'MTD Cost',
-                  value: Math.round(usageData?.monthToDateCost || 0),
-                  unit: 'PKR',
-                  change: usageData?.prevMonthCost > 0 ? Math.round(((usageData.monthToDateCost - usageData.prevMonthCost) / usageData.prevMonthCost) * 100) : 0,
+                  title: "Cost MTD",
+                  value: `Rs ${Math.round(usageData?.monthToDateCost || 0).toLocaleString()}`,
+                  delta: Number(usageData?.costChangePct || 0),
                   icon: DollarSign,
-                  gradient: 'from-accent-blue to-accent-purple'
                 },
                 {
-                  title: 'Forecast Bill',
-                  value: Math.round(forecastData?.forecast?.bill?.expected || usageData?.monthToDateCost || 0),
-                  unit: 'PKR',
-                  change: forecastData?.comparison?.vsLastMonth || 0,
+                  title: "Forecast Bill",
+                  value: `Rs ${Math.round(forecastData?.forecast?.bill?.expected || 0).toLocaleString()}`,
+                  delta: Number(forecastData?.comparison?.vsLastMonth || 0),
                   icon: TrendingUp,
-                  gradient: 'from-accent-amber to-accent-pink'
                 },
                 {
-                  title: 'Efficiency Score',
-                  value: Math.round(87), // Defaulting to 87 for now
-                  unit: '%',
-                  change: 12,
+                  title: "Efficiency",
+                  value: `${Math.round(usageData?.efficiencyScore || 0)}%`,
+                  delta: Number(usageData?.efficiencyChange || 0),
                   icon: Target,
-                  gradient: 'from-accent-emerald to-primary'
-                }
-              ].map((metric, index) => (
-                <Card key={index} className="card-premium animate-fade-in" ><div style={{ animationDelay: `${index * 0.1}s` }}>
-                   <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="relative">
-                        <div className={`absolute inset-0 bg-gradient-to-r ${metric.gradient} rounded-2xl blur-xl opacity-20`} />
-                        <div className={`relative bg-gradient-to-r ${metric.gradient} p-3 rounded-2xl`}>
-                          <metric.icon className="h-6 w-6 text-white" />
-                        </div>
-                      </div>
-                      <div className={`flex items-center space-x-1 text-sm font-medium ${
-                        metric.change > 0 ? 'text-red-400' : 'text-primary'
-                      }`}>
-                        {metric.change > 0 ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />}
-                        <span>{Math.abs(metric.change)}%</span>
-                      </div>
-                    </div>
-                    <div className="space-y-1">
-                      <p className="text-foreground-secondary text-sm font-medium">{metric.title}</p>
-                      <div className="flex items-baseline space-x-2">
-                        <span className="text-3xl font-bold text-foreground font-mono">
-                          {typeof metric.value === 'number' ? metric.value.toLocaleString() : metric.value}
-                        </span>
-                        <span className="text-foreground-tertiary text-sm">{metric.unit}</span>
-                      </div>
-                    </div>
-                  </div>
-                  </div>
-                 
-                </Card>
-              ))}
-            </div>
-
-            {/* Navigation Tabs */}
-            <div className="flex space-x-1 bg-background-secondary p-1 rounded-xl">
-              {[
-                { id: 'overview', label: 'Overview', icon: BarChart3 },
-                { id: 'forecasting', label: 'Forecasting', icon: TrendingUp },
-                { id: 'budget', label: 'Budget Analysis', icon: Target },
-                { id: 'anomalies', label: 'Anomalies', icon: AlertTriangle },
-                { id: 'insights', label: 'Insights', icon: Brain }
-              ].map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center space-x-2 px-6 py-3 rounded-lg transition-all ${
-                    activeTab === tab.id 
-                      ? 'bg-primary text-white shadow-lg' 
-                      : 'text-foreground-secondary hover:text-foreground hover:bg-background-tertiary'
-                  }`}
+                },
+              ].map((metric) => (
+                <Card
+                  key={metric.title}
+                  className="border border-white/10 bg-[#0f1727]/75"
                 >
-                  <tab.icon className="h-5 w-5" />
-                  <span>{tab.label}</span>
-                </button>
-              ))}
-            </div>
-
-            {/* Overview Tab */}
-            {activeTab === 'overview' && (
-              <div className="space-y-8">
-                {/* Weekly Usage Trend */}
-                <Card className="card-premium">
-                  <div className="space-y-6">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        <div className="bg-gradient-to-r from-primary to-accent-cyan p-2 rounded-xl">
-                          <Activity className="h-6 w-6 text-white" />
-                        </div>
-                        <div>
-                          <h2 className="text-2xl font-semibold text-foreground font-sora">Weekly Usage Trend</h2>
-                          <p className="text-foreground-secondary">Current month breakdown</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center space-x-2 text-sm text-foreground-secondary">
-                        <div className="w-3 h-3 bg-primary rounded-full" />
-                        <span>Usage (kWh)</span>
-                        <div className="w-3 h-3 bg-accent-amber rounded-full ml-4" />
-                        <span>Cost (PKR)</span>
-                      </div>
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.16em] text-foreground-tertiary">
+                        {metric.title}
+                      </p>
+                      <p className="mt-2 font-sora text-2xl font-semibold">
+                        {metric.value}
+                      </p>
+                      <p
+                        className={`mt-2 text-sm font-semibold ${deltaTone(metric.delta)}`}
+                      >
+                        {formatSignedPercent(metric.delta)}
+                      </p>
                     </div>
-                    
-                    <div className="h-80">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <LineChart data={weeklyChartData}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#2a2a30" />
-                          <XAxis dataKey="week" stroke="#6b6b7d" />
-                          <YAxis yAxisId="usage" orientation="left" stroke="#6b6b7d" />
-                          <YAxis yAxisId="cost" orientation="right" stroke="#6b6b7d" />
-                          <Tooltip 
-                            contentStyle={{ 
-                              backgroundColor: '#141417', 
-                              border: '1px solid #2a2a30',
-                              borderRadius: '12px',
-                              color: '#ffffff'
-                            }} 
-                          />
-                          <Line 
-                            yAxisId="usage"
-                            type="monotone" 
-                            dataKey="usage" 
-                            stroke="#00d4aa" 
-                            strokeWidth={3}
-                            dot={{ fill: '#00d4aa', strokeWidth: 2, r: 6 }}
-                            activeDot={{ r: 8, stroke: '#00d4aa', strokeWidth: 2 }}
-                          />
-                          <Line 
-                            yAxisId="cost"
-                            type="monotone" 
-                            dataKey="cost" 
-                            stroke="#f59e0b" 
-                            strokeWidth={3}
-                            dot={{ fill: '#f59e0b', strokeWidth: 2, r: 6 }}
-                            activeDot={{ r: 8, stroke: '#f59e0b', strokeWidth: 2 }}
-                          />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
+                    <span className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03]">
+                      <metric.icon className="h-5 w-5 text-cyan-200" />
+                    </span>
                   </div>
                 </Card>
+              ))}
+            </section>
 
-                {/* Cost Distribution */}
-                <div className="grid lg:grid-cols-2 gap-8">
-                  <Card className="card-premium">
-                    <div className="space-y-6">
-                      <div className="flex items-center space-x-3">
-                        <div className="bg-gradient-to-r from-accent-purple to-accent-pink p-2 rounded-xl">
-                          <DollarSign className="h-6 w-6 text-white" />
-                        </div>
-                        <div>
-                          <h3 className="text-xl font-semibold text-foreground font-sora">Slab Distribution</h3>
-                          <p className="text-foreground-secondary">Current month usage by tariff slab</p>
-                        </div>
-                      </div>
-                      
-                      <div className="h-64">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <PieChart>
-                            <Pie
-                              data={slabDistributionData}
-                              cx="50%"
-                              cy="50%"
-                              innerRadius={60}
-                              outerRadius={100}
-                              paddingAngle={5}
-                              dataKey="value"
-                            >
-                              {slabDistributionData.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.color} />
-                              ))}
-                            </Pie>
-                            <Tooltip 
-                              contentStyle={{ 
-                                backgroundColor: '#141417', 
-                                border: '1px solid #2a2a30',
-                                borderRadius: '12px',
-                                color: '#ffffff'
-                              }} 
-                            />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      </div>
-                      
-                      <div className="space-y-2">
-                        {slabDistributionData.map((item, index) => (
-                          <div key={index} className="flex items-center justify-between p-3 rounded-xl bg-background-card/30">
-                            <div className="flex items-center space-x-3">
-                              <div className="w-4 h-4 rounded-full" style={{ backgroundColor: item.color }} />
-                              <span className="text-foreground">{item.name}</span>
-                            </div>
-                            <div className="text-right">
-                              <p className="font-semibold text-foreground">{item.value} kWh</p>
-                              <p className="text-sm text-foreground-secondary">Rs {item.cost}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </Card>
-
-                  {/* Efficiency Metrics */}
-                  <Card className="card-premium">
-                    <div className="space-y-6">
-                      <div className="flex items-center space-x-3">
-                        <div className="bg-gradient-to-r from-accent-emerald to-primary p-2 rounded-xl">
-                          <Target className="h-6 w-6 text-white" />
-                        </div>
-                        <div>
-                          <h3 className="text-xl font-semibold text-foreground font-sora">Efficiency Analysis</h3>
-                          <p className="text-foreground-secondary">Performance vs targets</p>
-                        </div>
-                      </div>
-                      
-                      <div className="space-y-6">
-                        {[
-                          { label: 'Overall Efficiency', value: 87, target: 85, color: 'primary' },
-                          { label: 'Cost Efficiency', value: 92, target: 90, color: 'accent-blue' },
-                          { label: 'Peak Avoidance', value: 78, target: 80, color: 'accent-amber' },
-                          { label: 'Slab Optimization', value: 95, target: 85, color: 'accent-emerald' }
-                        ].map((metric, index) => (
-                          <div key={index} className="space-y-3">
-                            <div className="flex justify-between items-center">
-                              <span className="text-foreground font-medium">{metric.label}</span>
-                              <div className="flex items-center space-x-2">
-                                <span className="text-2xl font-bold text-foreground">{metric.value}%</span>
-                                {metric.value >= metric.target ? (
-                                  <CheckCircle className="h-5 w-5 text-primary" />
-                                ) : (
-                                  <AlertTriangle className="h-5 w-5 text-accent-amber" />
-                                )}
-                              </div>
-                            </div>
-                            <div className="relative">
-                              <div className="w-full bg-background-secondary rounded-full h-2">
-                                <div 
-                                  className={`h-2 rounded-full transition-all duration-500 ${
-                                    metric.value >= metric.target 
-                                      ? 'bg-gradient-to-r from-primary to-accent-cyan' 
-                                      : 'bg-gradient-to-r from-accent-amber to-red-500'
-                                  }`}
-                                  style={{ width: `${metric.value}%` }}
-                                />
-                              </div>
-                              <div 
-                                className="absolute top-1/2 transform -translate-y-1/2 w-1 h-4 bg-white border border-foreground-tertiary"
-                                style={{ left: `${metric.target}%` }}
-                              />
-                            </div>
-                            <div className="flex justify-between text-xs text-foreground-tertiary">
-                              <span>0%</span>
-                              <span>Target: {metric.target}%</span>
-                              <span>100%</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </Card>
+            {(forecastOverBudget || forecastAtRisk) && (
+              <section className="rounded-3xl border border-red-500/25 bg-red-500/10 p-5">
+                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <p className="text-sm text-red-100">
+                    {forecastOverBudget
+                      ? `Forecast is above budget by Rs ${Math.round(budgetProjected - budgetTarget).toLocaleString()}.`
+                      : "Forecast is near budget threshold."}
+                  </p>
+                  <Link
+                    href="/optimization"
+                    className="text-sm font-semibold text-red-100 underline-offset-4 hover:underline"
+                  >
+                    Open Optimization
+                  </Link>
                 </div>
-              </div>
+              </section>
             )}
 
-            {/* Forecasting Tab */}
-            {activeTab === 'forecasting' && (
-              <div className="space-y-8">
-                {/* Forecast Scenarios */}
-                <Card className="card-premium">
-                  <div className="space-y-6">
-                    <div className="flex items-center space-x-3">
-                      <div className="bg-gradient-to-r from-accent-blue to-accent-purple p-2 rounded-xl">
-                        <TrendingUp className="h-6 w-6 text-white" />
-                      </div>
-                      <div>
-                        <h2 className="text-2xl font-semibold text-foreground font-sora">Monthly Forecast Scenarios</h2>
-                        <p className="text-foreground-secondary">Projected usage and costs based on current patterns</p>
-                      </div>
-                    </div>
-                    
-                    <div className="h-80">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={forecastChartData}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#2a2a30" />
-                          <XAxis dataKey="scenario" stroke="#6b6b7d" />
-                          <YAxis yAxisId="usage" orientation="left" stroke="#6b6b7d" />
-                          <YAxis yAxisId="cost" orientation="right" stroke="#6b6b7d" />
-                          <Tooltip 
-                            contentStyle={{ 
-                              backgroundColor: '#141417', 
-                              border: '1px solid #2a2a30',
-                              borderRadius: '12px',
-                              color: '#ffffff'
-                            }} 
-                          />
-                          <Bar yAxisId="usage" dataKey="usage" fill="#00d4aa" radius={[4, 4, 0, 0]} />
-                          <Bar yAxisId="cost" dataKey="cost" fill="#f59e0b" radius={[4, 4, 0, 0]} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
+            <section className="rounded-3xl border border-white/10 bg-[#0f1727]/75 p-2">
+              <div className="flex flex-wrap gap-1">
+                {tabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm transition ${activeTab === tab.id ? "bg-gradient-to-r from-cyan-400/25 to-primary/20 text-white" : "text-foreground-secondary hover:bg-white/5 hover:text-foreground"}`}
+                  >
+                    <tab.icon className="h-4 w-4" />
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            {activeTab === "overview" && (
+              <section className="grid gap-6 xl:grid-cols-2">
+                <Card className="border border-white/10 bg-[#0f1727]/75">
+                  <h3 className="mb-4 font-sora text-xl font-semibold">
+                    Weekly Trend
+                  </h3>
+                  <div className="h-72">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={weeklyChartData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#263246" />
+                        <XAxis dataKey="week" stroke="#8a96a8" />
+                        <YAxis yAxisId="usage" stroke="#8a96a8" />
+                        <YAxis
+                          yAxisId="cost"
+                          orientation="right"
+                          stroke="#8a96a8"
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "#0f1727",
+                            border: "1px solid #2b3a52",
+                            borderRadius: "12px",
+                          }}
+                        />
+                        <Line
+                          yAxisId="usage"
+                          type="monotone"
+                          dataKey="usage"
+                          stroke="#00d4aa"
+                          strokeWidth={2.5}
+                        />
+                        <Line
+                          yAxisId="cost"
+                          type="monotone"
+                          dataKey="cost"
+                          stroke="#f59e0b"
+                          strokeWidth={2.5}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
                   </div>
                 </Card>
+                <Card className="border border-white/10 bg-[#0f1727]/75">
+                  <h3 className="mb-4 font-sora text-xl font-semibold">
+                    Slab Distribution
+                  </h3>
+                  <div className="h-72">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={slabDistribution}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={55}
+                          outerRadius={95}
+                          paddingAngle={4}
+                          dataKey="units"
+                        >
+                          {slabDistribution.map((entry: any, index: number) => (
+                            <Cell key={`slab-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "#0f1727",
+                            border: "1px solid #2b3a52",
+                            borderRadius: "12px",
+                          }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                </Card>
+              </section>
+            )}
 
-                {/* Forecast Details */}
-                <div className="grid lg:grid-cols-3 gap-6">
-                  {forecastChartData.map((scenario, index) => (
-                    <Card key={index} className="card-premium">
-                      <div className="space-y-4">
-                        <div className="flex items-center justify-between">
-                          <h3 className="text-lg font-semibold text-foreground">{scenario.scenario} Scenario</h3>
-                          <div className={`px-3 py-1 rounded-full text-xs font-medium ${
-                            scenario.scenario === 'Low' ? 'bg-primary/10 text-primary' :
-                            scenario.scenario === 'Expected' ? 'bg-accent-blue/10 text-accent-blue' :
-                            'bg-accent-amber/10 text-accent-amber'
-                          }`}>
-                            {scenario.scenario === 'Expected' ? 'Most Likely' : scenario.scenario}
-                          </div>
-                        </div>
-                        
-                        <div className="space-y-3">
-                          <div className="flex justify-between">
-                            <span className="text-foreground-secondary">Usage:</span>
-                            <span className="font-bold text-foreground">{scenario.usage} kWh</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-foreground-secondary">Cost:</span>
-                            <span className="font-bold text-primary">Rs {scenario.cost.toLocaleString()}</span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span className="text-foreground-secondary">vs Last Month:</span>
-                            <span className={`font-medium ${
-                              (forecastData?.comparison?.vsLastMonth || 0) > 0 ? 'text-red-400' : 'text-primary'
-                            }`}>
-                              {(forecastData?.comparison?.vsLastMonth || 0) > 0 ? '+' : ''}
-                              {forecastData?.comparison?.vsLastMonth || 0}%
-                            </span>
-                          </div>
-                        </div>
-                      </div>
+            {activeTab === "forecast" && (
+              <section className="space-y-6">
+                <Card className="border border-white/10 bg-[#0f1727]/75">
+                  <h3 className="mb-4 font-sora text-xl font-semibold">
+                    Scenario Model
+                  </h3>
+                  <div className="h-72">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={forecastChartData}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#263246" />
+                        <XAxis dataKey="name" stroke="#8a96a8" />
+                        <YAxis yAxisId="usage" stroke="#8a96a8" />
+                        <YAxis
+                          yAxisId="cost"
+                          orientation="right"
+                          stroke="#8a96a8"
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: "#0f1727",
+                            border: "1px solid #2b3a52",
+                            borderRadius: "12px",
+                          }}
+                        />
+                        <Bar
+                          yAxisId="usage"
+                          dataKey="usage"
+                          fill="#00d4aa"
+                          radius={[6, 6, 0, 0]}
+                        />
+                        <Bar
+                          yAxisId="cost"
+                          dataKey="cost"
+                          fill="#f59e0b"
+                          radius={[6, 6, 0, 0]}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </Card>
+                <div className="grid gap-4 md:grid-cols-3">
+                  {forecastChartData.map((scenario: any) => (
+                    <Card
+                      key={scenario.name}
+                      className="border border-white/10 bg-[#0f1727]/75"
+                    >
+                      <p className="text-xs uppercase tracking-[0.16em] text-foreground-tertiary">
+                        {scenario.name}
+                      </p>
+                      <p className="mt-2 text-lg font-semibold">
+                        {Math.round(scenario.usage).toLocaleString()} kWh
+                      </p>
+                      <p className="text-sm text-foreground-secondary">
+                        Rs {Math.round(scenario.cost).toLocaleString()}
+                      </p>
                     </Card>
                   ))}
                 </div>
-              </div>
+              </section>
             )}
 
-            {/* Budget Analysis Tab */}
-            {activeTab === 'budget' && (
-              <div className="space-y-8">
-                <Card className="card-premium">
-                  <div className="space-y-6">
-                    <div className="flex items-center space-x-3">
-                      <div className="bg-gradient-to-r from-primary to-accent-cyan p-2 rounded-xl">
-                        <Target className="h-6 w-6 text-white" />
+            {activeTab === "budget" && (
+              <section className="space-y-6">
+                {hasBudget ? (
+                  <Card className="border border-white/10 bg-[#0f1727]/75">
+                    <div className="space-y-4">
+                      <h3 className="font-sora text-lg font-semibold">
+                        Budget Load
+                      </h3>
+                      <div>
+                        <div className="mb-1 flex items-center justify-between text-sm">
+                          <span className="text-foreground-secondary">
+                            Spent
+                          </span>
+                          <span>
+                            Rs {Math.round(budgetSpent).toLocaleString()} / Rs{" "}
+                            {Math.round(budgetTarget).toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                          <div
+                            className="h-full rounded-full bg-gradient-to-r from-cyan-300 to-primary"
+                            style={{ width: `${budgetSpentPct}%` }}
+                          />
+                        </div>
                       </div>
                       <div>
-                        <h2 className="text-2xl font-semibold text-foreground font-sora">Budget Performance</h2>
-                        <p className="text-foreground-secondary">Track your spending against monthly targets</p>
+                        <div className="mb-1 flex items-center justify-between text-sm">
+                          <span className="text-foreground-secondary">
+                            Projected
+                          </span>
+                          <span>
+                            Rs {Math.round(budgetProjected).toLocaleString()} /
+                            Rs {Math.round(budgetTarget).toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                          <div
+                            className={`h-full rounded-full ${forecastOverBudget ? "bg-gradient-to-r from-red-400 to-red-300" : forecastAtRisk ? "bg-gradient-to-r from-amber-300 to-orange-300" : "bg-gradient-to-r from-emerald-300 to-primary"}`}
+                            style={{ width: `${budgetProjectedPct}%` }}
+                          />
+                        </div>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {(budgetData?.recommendations || [])
+                          .slice(0, 4)
+                          .map((item: string, index: number) => (
+                            <div
+                              key={`budget-rec-${index}`}
+                              className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-sm text-foreground-secondary"
+                            >
+                              {item}
+                            </div>
+                          ))}
                       </div>
                     </div>
-                    
-                    <div className="grid lg:grid-cols-2 gap-8">
-                      <div className="space-y-6">
-                        <div className="p-6 rounded-2xl bg-gradient-to-br from-primary/10 to-accent-cyan/10 border border-primary/20">
-                          <div className="space-y-4">
-                            <div className="flex items-center justify-between">
-                              <h3 className="font-semibold text-foreground">Monthly Budget Status</h3>
-                              <span className="px-3 py-1 rounded-full text-xs font-medium bg-primary/10 text-primary">
-                                On Track
-                              </span>
-                            </div>
-                            <div className="space-y-3">
-                              <div className="flex justify-between">
-                                <span className="text-foreground-secondary">Budget:</span>
-                                <span className="font-bold text-foreground">Rs 25,000</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-foreground-secondary">Spent:</span>
-                                <span className="font-bold text-foreground">Rs {Math.round(usageData?.monthToDateCost || 0).toLocaleString()}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-foreground-secondary">Remaining:</span>
-                                <span className="font-bold text-primary">Rs {(25000 - Math.round(usageData?.monthToDateCost || 0)).toLocaleString()}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-foreground-secondary">Projected:</span>
-                                <span className="font-bold text-foreground">Rs {Math.round(forecastData?.forecast?.bill?.expected || 0).toLocaleString()}</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="space-y-4">
-                          <h4 className="font-semibold text-foreground">Budget Recommendations</h4>
-                          <div className="space-y-3">
-                            {[
-                              'Maintain current usage pattern to stay within budget',
-                              'Consider reducing AC usage by 1 hour daily to save Rs 800',
-                              'Schedule high-power appliances during off-peak hours'
-                            ].map((rec, index) => (
-                              <div key={index} className="flex items-start space-x-3 p-4 rounded-xl bg-background-card/30">
-                                <CheckCircle className="h-5 w-5 text-primary mt-0.5" />
-                                <span className="text-foreground-secondary">{rec}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="space-y-6">
-                        <div className="p-6 rounded-2xl bg-gradient-to-br from-accent-amber/10 to-accent-pink/10 border border-accent-amber/20">
-                          <div className="space-y-4">
-                            <h3 className="font-semibold text-foreground">Daily Budget Tracking</h3>
-                            <div className="space-y-3">
-                              <div className="flex justify-between">
-                                <span className="text-foreground-secondary">Daily Target:</span>
-                                <span className="font-bold text-foreground">Rs 833</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-foreground-secondary">Daily Average:</span>
-                                <span className="font-bold text-primary">Rs {Math.round((usageData?.monthToDateCost || 0) / 20)}</span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-foreground-secondary">Today's Usage:</span>
-                                <span className="font-bold text-foreground">Rs 720</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="space-y-4">
-                          <h4 className="font-semibold text-foreground">Savings Opportunities</h4>
-                          <div className="space-y-3">
-                            {[
-                              { action: 'Reduce AC by 2°C', savings: 'Rs 1,200/month' },
-                              { action: 'Use timer for water heater', savings: 'Rs 800/month' },
-                              { action: 'Switch to LED lighting', savings: 'Rs 400/month' }
-                            ].map((opportunity, index) => (
-                              <div key={index} className="flex items-center justify-between p-4 rounded-xl bg-background-card/30">
-                                <span className="text-foreground">{opportunity.action}</span>
-                                <span className="font-semibold text-primary">{opportunity.savings}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </Card>
-              </div>
+                  </Card>
+                ) : (
+                  <Card className="border border-white/10 bg-[#0f1727]/75">
+                    <p className="text-sm text-foreground-secondary">
+                      No budget target configured. Set one from dashboard to
+                      unlock budget analysis.
+                    </p>
+                  </Card>
+                )}
+              </section>
             )}
 
-            {/* Anomalies Tab */}
-            {activeTab === 'anomalies' && (
-              <div className="space-y-8">
-                <Card className="card-premium">
-                  <div className="space-y-6">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        <div className="bg-gradient-to-r from-red-500 to-accent-amber p-2 rounded-xl">
-                          <AlertTriangle className="h-6 w-6 text-white" />
+            {activeTab === "anomalies" && (
+              <section className="space-y-3">
+                {anomalies.length > 0 ? (
+                  anomalies.map((anomaly: any) => (
+                    <Card
+                      key={anomaly.id}
+                      className="border border-white/10 bg-[#0f1727]/75"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <p className="text-sm font-semibold">
+                            {anomaly.title}
+                          </p>
+                          <p className="text-sm text-foreground-secondary">
+                            {anomaly.description}
+                          </p>
+                          <p className="text-xs text-foreground-tertiary">
+                            Severity: {anomaly.severity}
+                          </p>
                         </div>
-                        <div>
-                          <h2 className="text-2xl font-semibold text-foreground font-sora">Anomaly Detection</h2>
-                          <p className="text-foreground-secondary">Unusual patterns and calculation discrepancies</p>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={
+                              anomalyActionLoading ===
+                              `investigate:${anomaly.id}`
+                            }
+                            onClick={() =>
+                              void triggerAnomalyAction(
+                                anomaly.id,
+                                "investigate",
+                              )
+                            }
+                          >
+                            {anomalyActionLoading ===
+                            `investigate:${anomaly.id}`
+                              ? "Updating..."
+                              : "Investigate"}
+                          </Button>
+                          {!anomaly.resolved && (
+                            <Button
+                              size="sm"
+                              disabled={
+                                anomalyActionLoading === `resolve:${anomaly.id}`
+                              }
+                              onClick={() =>
+                                void triggerAnomalyAction(anomaly.id, "resolve")
+                              }
+                            >
+                              {anomalyActionLoading === `resolve:${anomaly.id}`
+                                ? "Updating..."
+                                : "Resolve"}
+                            </Button>
+                          )}
                         </div>
                       </div>
-                      <div className="flex items-center space-x-2 text-sm">
-                        <div className="flex items-center space-x-2">
-                          <div className="w-2 h-2 bg-red-500 rounded-full" />
-                          <span className="text-foreground-secondary">High</span>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <div className="w-2 h-2 bg-accent-amber rounded-full" />
-                          <span className="text-foreground-secondary">Medium</span>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <div className="w-2 h-2 bg-accent-blue rounded-full" />
-                          <span className="text-foreground-secondary">Low</span>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="space-y-4">
-                      {anomalies.map((anomaly, index) => (
-                        <div key={anomaly.id} className={`p-6 rounded-2xl border-l-4 transition-all duration-300 hover:shadow-card ${getAnomalySeverityColor(anomaly.severity)}`}>
-                          <div className="flex items-start justify-between">
-                            <div className="space-y-3">
-                              <div className="flex items-center space-x-3">
-                                <AlertTriangle className={`h-5 w-5 ${
-                                  anomaly.severity === 'high' ? 'text-red-500' :
-                                  anomaly.severity === 'medium' ? 'text-accent-amber' :
-                                  'text-accent-blue'
-                                }`} />
-                                <h3 className="font-semibold text-foreground text-lg">{anomaly.title}</h3>
-                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                  anomaly.resolved ? 'bg-primary/10 text-primary' : 'bg-red-500/10 text-red-400'
-                                }`}>
-                                  {anomaly.resolved ? 'Resolved' : 'Active'}
-                                </span>
-                              </div>
-                              <p className="text-foreground-secondary leading-relaxed">{anomaly.description}</p>
-                              <div className="flex items-center space-x-4 text-sm">
-                                <div className="flex items-center space-x-1">
-                                  <Calendar className="h-4 w-4 text-foreground-tertiary" />
-                                  <span className="text-foreground-tertiary">{anomaly.date}</span>
-                                </div>
-                                <div className="flex items-center space-x-1">
-                                  <DollarSign className="h-4 w-4 text-foreground-tertiary" />
-                                  <span className="text-foreground-tertiary">{anomaly.impact}</span>
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex space-x-2">
-                              <Button variant="ghost" size="sm">
-                                Investigate
-                              </Button>
-                              {!anomaly.resolved && (
-                                <Button size="sm">
-                                  Mark Resolved
-                                </Button>
+                    </Card>
+                  ))
+                ) : (
+                  <Card className="border border-white/10 bg-[#0f1727]/75">
+                    <p className="text-sm text-foreground-secondary">
+                      No active anomalies for this filter.
+                    </p>
+                  </Card>
+                )}
+              </section>
+            )}
+
+            {activeTab === "insights" && (
+              <section className="grid gap-6 xl:grid-cols-2">
+                <Card className="border border-white/10 bg-[#0f1727]/75">
+                  <h3 className="mb-4 font-sora text-lg font-semibold">
+                    System Insights
+                  </h3>
+                  <div className="space-y-3">
+                    {insights.length > 0 ? (
+                      insights
+                        .slice(0, 6)
+                        .map((insight: any, index: number) => (
+                          <article
+                            key={`insight-${index}`}
+                            className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
+                          >
+                            <div className="flex items-start gap-2">
+                              {insight.type === "warning" ||
+                              insight.type === "critical" ? (
+                                <AlertTriangle className="h-4 w-4 text-amber-300" />
+                              ) : insight.type === "success" ? (
+                                <CheckCircle className="h-4 w-4 text-emerald-300" />
+                              ) : (
+                                <Lightbulb className="h-4 w-4 text-cyan-300" />
                               )}
+                              <div>
+                                <p className="text-sm font-semibold">
+                                  {insight.title}
+                                </p>
+                                <p className="text-sm text-foreground-secondary">
+                                  {insight.message}
+                                </p>
+                              </div>
                             </div>
-                          </div>
+                          </article>
+                        ))
+                    ) : (
+                      <p className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-sm text-foreground-secondary">
+                        Insights will appear as more data arrives.
+                      </p>
+                    )}
+                  </div>
+                </Card>
+
+                <Card className="border border-white/10 bg-[#0f1727]/75">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h3 className="font-sora text-lg font-semibold">
+                      AI Recommendations
+                    </h3>
+                    <Button
+                      onClick={() => void generateAiSuggestions()}
+                      disabled={aiGenerating}
+                    >
+                      <Sparkles className="h-4 w-4" />
+                      {aiGenerating ? "Generating..." : "Generate"}
+                    </Button>
+                  </div>
+                  <div className="space-y-3">
+                    {aiWarnings
+                      .slice(0, 2)
+                      .map((warning: any, index: number) => (
+                        <div
+                          key={`ai-warning-${index}`}
+                          className={`rounded-xl border p-3 ${alertTone(warning.severity)}`}
+                        >
+                          <p className="text-sm font-semibold">
+                            {warning.title}
+                          </p>
+                          <p className="text-sm">{warning.message}</p>
                         </div>
                       ))}
-                    </div>
-                  </div>
-                </Card>
-              </div>
-            )}
-
-            {/* Insights Tab */}
-            {activeTab === 'insights' && (
-              <div className="space-y-8">
-                <Card className="card-premium">
-                  <div className="space-y-6">
-                    <div className="flex items-center space-x-3">
-                      <div className="bg-gradient-to-r from-accent-purple to-accent-pink p-2 rounded-xl">
-                        <Brain className="h-6 w-6 text-white" />
-                      </div>
-                      <div>
-                        <h2 className="text-2xl font-semibold text-foreground font-sora">AI-Powered Insights</h2>
-                        <p className="text-foreground-secondary">Actionable recommendations based on your usage patterns</p>
-                      </div>
-                    </div>
-                    
-                    <div className="grid lg:grid-cols-2 gap-8">
-                      <div className="space-y-6">
-                        <h3 className="text-lg font-semibold text-foreground">Cost Optimization</h3>
-                        <div className="space-y-4">
-                          {insights.slice(0, 3).map((insight, index) => (
-                            <div key={index} className="p-5 rounded-2xl bg-background-card/30 border border-border/30 space-y-3">
-                              <div className="flex items-start space-x-3">
-                                {getInsightIcon(insight.type)}
-                                <div className="space-y-2">
-                                  <h4 className="font-semibold text-foreground">{insight.title}</h4>
-                                  <p className="text-foreground-secondary leading-relaxed">{insight.message}</p>
-                                  {insight.impact && (
-                                    <p className="text-primary text-sm font-medium">{insight.impact}</p>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="space-y-6">
-                        <h3 className="text-lg font-semibold text-foreground">Smart Recommendations</h3>
-                        <div className="space-y-4">
-                          {[
-                            {
-                              title: 'Peak Hour Optimization',
-                              description: 'Shift 30% of usage to off-peak hours',
-                              savings: 'Rs 1,200/month',
-                              difficulty: 'Easy',
-                              icon: Clock
-                            },
-                            {
-                              title: 'Temperature Adjustment',
-                              description: 'Increase AC temperature by 2°C',
-                              savings: 'Rs 800/month',
-                              difficulty: 'Easy',
-                              icon: Target
-                            },
-                            {
-                              title: 'Smart Scheduling',
-                              description: 'Use timers for water heater and washing machine',
-                              savings: 'Rs 600/month',
-                              difficulty: 'Medium',
-                              icon: Brain
+                    {aiRecommendations.length > 0 ? (
+                      aiRecommendations
+                        .slice(0, 4)
+                        .map((recommendation: any, index: number) => (
+                          <article
+                            key={
+                              recommendation.id ||
+                              `${recommendation.title}-${index}`
                             }
-                          ].map((rec, index) => (
-                            <div key={index} className="p-5 rounded-2xl bg-background-card/30 border border-border/30 space-y-4">
-                              <div className="flex items-start justify-between">
-                                <div className="flex items-start space-x-3">
-                                  <div className="bg-gradient-to-r from-primary to-accent-cyan p-2 rounded-lg">
-                                    <rec.icon className="h-5 w-5 text-white" />
-                                  </div>
-                                  <div className="space-y-2">
-                                    <h4 className="font-semibold text-foreground">{rec.title}</h4>
-                                    <p className="text-foreground-secondary text-sm leading-relaxed">{rec.description}</p>
-                                  </div>
-                                </div>
-                                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                  rec.difficulty === 'Easy' ? 'bg-primary/10 text-primary' : 'bg-accent-amber/10 text-accent-amber'
-                                }`}>
-                                  {rec.difficulty}
-                                </span>
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center space-x-2">
-                                  <Sparkles className="h-4 w-4 text-primary" />
-                                  <span className="font-semibold text-primary">{rec.savings}</span>
-                                </div>
-                                <Button size="sm">
-                                  Apply
-                                </Button>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
+                            className="rounded-xl border border-white/10 bg-white/[0.03] p-3"
+                          >
+                            <p className="text-sm font-semibold">
+                              {recommendation.title}
+                            </p>
+                            <p className="text-sm text-foreground-secondary">
+                              {recommendation.reason}
+                            </p>
+                            <p className="mt-2 text-xs font-semibold text-emerald-300">
+                              Rs{" "}
+                              {Math.round(
+                                Number(recommendation.estimatedSavingsPkr || 0),
+                              ).toLocaleString()}
+                              /month
+                            </p>
+                          </article>
+                        ))
+                    ) : (
+                      <p className="rounded-xl border border-white/10 bg-white/[0.03] p-3 text-sm text-foreground-secondary">
+                        Generate AI insights to get personalized actions.
+                      </p>
+                    )}
                   </div>
                 </Card>
-              </div>
+              </section>
             )}
 
-            {/* Comparison Analysis */}
-            {comparisonData && (
-              <Card className="card-premium">
-                <div className="space-y-6">
-                  <div className="flex items-center space-x-3">
-                    <div className="bg-gradient-to-r from-accent-emerald to-primary p-2 rounded-xl">
-                      <TrendingUp className="h-6 w-6 text-white" />
-                    </div>
-                    <div>
-                      <h2 className="text-2xl font-semibold text-foreground font-sora">Comparison Analysis</h2>
-                      <p className="text-foreground-secondary">Performance vs previous periods</p>
-                    </div>
-                  </div>
-                  
-                  <div className="grid md:grid-cols-3 gap-6">
-                    {Array.isArray(comparisonData.comparisons) ? 
-                      comparisonData.comparisons.map((comparison: any, index: number) => (
-                        <div key={index} className="p-6 rounded-2xl bg-background-card/30 border border-border/30">
-                          <div className="space-y-4">
-                            <div className="flex items-center justify-between">
-                              <h3 className="font-semibold text-foreground">{comparison.comparisonType}</h3>
-                              <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                comparison.trend === 'increasing' ? 'bg-red-500/10 text-red-400' :
-                                comparison.trend === 'decreasing' ? 'bg-primary/10 text-primary' :
-                                'bg-accent-blue/10 text-accent-blue'
-                              }`}>
-                                {comparison.trend}
-                              </span>
-                            </div>
-                            <div className="space-y-2">
-                              <div className="flex justify-between">
-                                <span className="text-foreground-secondary">Usage Change:</span>
-                                <span className={`font-bold ${
-                                  comparison.percentageChange.usage > 0 ? 'text-red-400' : 'text-primary'
-                                }`}>
-                                  {comparison.percentageChange.usage > 0 ? '+' : ''}{comparison.percentageChange.usage}%
-                                </span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-foreground-secondary">Cost Change:</span>
-                                <span className={`font-bold ${
-                                  comparison.percentageChange.cost > 0 ? 'text-red-400' : 'text-primary'
-                                }`}>
-                                  {comparison.percentageChange.cost > 0 ? '+' : ''}{comparison.percentageChange.cost}%
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )) :
-                      // Single comparison object
-                      <div className="p-6 rounded-2xl bg-background-card/30 border border-border/30">
-                        <div className="space-y-4">
-                          <div className="flex items-center justify-between">
-                            <h3 className="font-semibold text-foreground">{comparisonData.comparisons.comparisonType}</h3>
-                            <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                              comparisonData.comparisons.trend === 'increasing' ? 'bg-red-500/10 text-red-400' :
-                              comparisonData.comparisons.trend === 'decreasing' ? 'bg-primary/10 text-primary' :
-                              'bg-accent-blue/10 text-accent-blue'
-                            }`}>
-                              {comparisonData.comparisons.trend}
-                            </span>
-                          </div>
-                          <div className="space-y-2">
-                            <div className="flex justify-between">
-                              <span className="text-foreground-secondary">Usage Change:</span>
-                              <span className={`font-bold ${
-                                comparisonData.comparisons.percentageChange.usage > 0 ? 'text-red-400' : 'text-primary'
-                              }`}>
-                                {comparisonData.comparisons.percentageChange.usage > 0 ? '+' : ''}{comparisonData.comparisons.percentageChange.usage}%
-                              </span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span className="text-foreground-secondary">Cost Change:</span>
-                              <span className={`font-bold ${
-                                comparisonData.comparisons.percentageChange.cost > 0 ? 'text-red-400' : 'text-primary'
-                              }`}>
-                                {comparisonData.comparisons.percentageChange.cost > 0 ? '+' : ''}{comparisonData.comparisons.percentageChange.cost}%
-                              </span>
-                            </div>
-                          </div>
-                        </div>
+            {alertFeed.length > 0 && (
+              <section className="space-y-3">
+                {alertFeed.slice(0, 3).map((alert: any) => (
+                  <article
+                    key={alert.id}
+                    className={`rounded-2xl border p-4 ${alertTone(alert.severity)}`}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold">{alert.title}</p>
+                        <p className="text-sm">{alert.message}</p>
                       </div>
-                    }
-                  </div>
-                </div>
-              </Card>
+                      <span className="rounded-full border border-current/30 px-2 py-0.5 text-[11px] uppercase">
+                        {alert.severity}
+                      </span>
+                    </div>
+                  </article>
+                ))}
+              </section>
             )}
           </div>
         </main>
       </div>
     </div>
-  )
-}
+  );
+};
 
-export default AnalyticsPage
+export default AnalyticsPage;

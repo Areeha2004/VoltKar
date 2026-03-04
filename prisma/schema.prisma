@@ -6,6 +6,7 @@ generator client {
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")  
 }
 model User {
   id            String    @id @default(cuid())
@@ -175,6 +176,7 @@ model UserPreference {
   language String // en, ur
   unitType String // kWh, etc.
   currency String // PKR
+  monthlyBudgetPkr Float?
 
   user User @relation(fields: [userId], references: [id])
 }

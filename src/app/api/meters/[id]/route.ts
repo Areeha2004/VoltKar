@@ -1,7 +1,7 @@
 // app/api/meters/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import { authOptions } from '../../auth/[...nextauth]/route'
+import { authOptions } from '@/lib/authOptions'
 import prisma from '@/lib/prisma'
 
 export async function PUT(
@@ -17,6 +17,8 @@ export async function PUT(
 
     const { label, type } = await request.json()
     const meterId = params.id
+    const nextLabel = label !== undefined ? String(label).trim() : undefined
+    const nextType = type !== undefined ? String(type).trim() : undefined
 
     const existingMeter = await prisma.meter.findFirst({
       where: { id: meterId, userId: session.user.id }
@@ -26,11 +28,15 @@ export async function PUT(
       return NextResponse.json({ error: 'Meter not found' }, { status: 404 })
     }
 
+    if (nextLabel !== undefined && !nextLabel) {
+      return NextResponse.json({ error: 'Label cannot be empty' }, { status: 400 })
+    }
+
     const meter = await prisma.meter.update({
       where: { id: meterId },
       data: {
-        label: label?.trim() ?? existingMeter.label,
-        type: type?.trim() ?? existingMeter.type
+        label: nextLabel ?? existingMeter.label,
+        type: nextType ?? existingMeter.type
       }
     })
 
@@ -72,3 +78,4 @@ export async function DELETE(
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+

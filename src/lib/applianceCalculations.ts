@@ -28,6 +28,23 @@ export interface ApplianceCalculationResult {
   contribution: number
 }
 
+export interface ApplianceCostAllocationItem {
+  id: string
+  estimatedKwh: number
+}
+
+export interface ApplianceCostAllocation {
+  id: string
+  estimatedKwh: number
+  sharePct: number
+  estimatedCost: number
+  costPerKwh: number
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100
+}
+
 /**
  * Calculate estimated kWh consumption for an appliance
  */
@@ -86,9 +103,82 @@ export function calculateContributions(appliances: ApplianceData[]): ApplianceCa
  */
 export function calculateApplianceCost(estimatedKwh: number): number {
   if (estimatedKwh <= 0) return 0
-  
+
+  // Variable-only cost model for appliance-level attribution.
+  // Fixed charges are household-level and should not be multiplied per appliance.
   const costBreakdown = tariffEngine(estimatedKwh)
-  return Math.round(costBreakdown.totalCost * 100) / 100
+  const variableSubtotal = costBreakdown.energyCost + costBreakdown.fuelAdj
+  const variableTax = variableSubtotal * 0.17
+  return round2(variableSubtotal + variableTax)
+}
+
+/**
+ * Allocate a household-equivalent bill across appliances by kWh share.
+ * This avoids multiplying fixed charges/taxes per appliance while keeping totals coherent.
+ */
+export function allocateAppliancePortfolioCosts(
+  appliances: ApplianceCostAllocationItem[]
+): {
+  totalKwh: number
+  totalCost: number
+  allocations: ApplianceCostAllocation[]
+} {
+  const normalized = appliances.map(item => ({
+    id: item.id,
+    estimatedKwh: Math.max(0, Number(item.estimatedKwh) || 0)
+  }))
+
+  const totalKwh = round2(normalized.reduce((sum, item) => sum + item.estimatedKwh, 0))
+  if (totalKwh <= 0) {
+    return {
+      totalKwh: 0,
+      totalCost: 0,
+      allocations: normalized.map(item => ({
+        id: item.id,
+        estimatedKwh: item.estimatedKwh,
+        sharePct: 0,
+        estimatedCost: 0,
+        costPerKwh: 0
+      }))
+    }
+  }
+
+  const totalCost = round2(tariffEngine(totalKwh).totalCost)
+  const costPerKwh = totalCost / totalKwh
+
+  return {
+    totalKwh,
+    totalCost,
+    allocations: normalized.map(item => {
+      const share = item.estimatedKwh / totalKwh
+      const estimatedCost = round2(totalCost * share)
+      return {
+        id: item.id,
+        estimatedKwh: item.estimatedKwh,
+        sharePct: round2(share * 100),
+        estimatedCost,
+        costPerKwh: round2(costPerKwh)
+      }
+    })
+  }
+}
+
+/**
+ * Estimate savings when one appliance's kWh is changed, based on household total delta.
+ */
+export function estimateHouseholdSavingsFromApplianceDelta(
+  householdKwh: number,
+  currentApplianceKwh: number,
+  newApplianceKwh: number
+): number {
+  const safeHousehold = Math.max(0, Number(householdKwh) || 0)
+  const safeCurrent = Math.max(0, Number(currentApplianceKwh) || 0)
+  const safeNew = Math.max(0, Number(newApplianceKwh) || 0)
+
+  const before = tariffEngine(safeHousehold).totalCost
+  const afterTotalKwh = Math.max(0, safeHousehold - safeCurrent + safeNew)
+  const after = tariffEngine(afterTotalKwh).totalCost
+  return round2(Math.max(0, before - after))
 }
 
 /**

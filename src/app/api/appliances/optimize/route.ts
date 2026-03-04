@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import { authOptions } from '../../auth/[...nextauth]/route'
+import { authOptions } from '@/lib/authOptions'
 import prisma from '@/lib/prisma'
 import { 
   calculateEstimatedKwh, 
-  calculateApplianceCost,
+  allocateAppliancePortfolioCosts,
+  estimateHouseholdSavingsFromApplianceDelta,
   generateOptimizationSuggestions,
   getEfficiencyRating
 } from '@/lib/applianceCalculations'
+import { tariffEngine } from '@/lib/tariffEngine'
 
 export async function GET(request: NextRequest) {
   try {
@@ -20,19 +22,12 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const applianceId = searchParams.get('applianceId')
 
-    // Build query conditions
-    const whereConditions: any = {
-      userId: session.user.id
-    }
-
-    if (applianceId) {
-      whereConditions.id = applianceId
-    }
-
-    // Fetch appliances
-    const appliances = await prisma.appliance.findMany({
-      where: whereConditions
+    const allUserAppliances = await prisma.appliance.findMany({
+      where: { userId: session.user.id }
     })
+    const appliances = applianceId
+      ? allUserAppliances.filter(appliance => appliance.id === applianceId)
+      : allUserAppliances
 
     if (appliances.length === 0) {
       return NextResponse.json({
@@ -47,10 +42,24 @@ export async function GET(request: NextRequest) {
       })
     }
 
+    const totalHouseholdKwh = allUserAppliances.reduce(
+      (sum, appliance) => sum + (appliance.estimatedKwh || 0),
+      0
+    )
+    const portfolio = allocateAppliancePortfolioCosts(
+      allUserAppliances.map(appliance => ({
+        id: appliance.id,
+        estimatedKwh: appliance.estimatedKwh || 0
+      }))
+    )
+    const allocationById = new Map(
+      portfolio.allocations.map(item => [item.id, item])
+    )
+
     // Generate optimizations for each appliance
     const optimizations = appliances.map(appliance => {
       const currentKwh = appliance.estimatedKwh || 0
-      const currentCost = calculateApplianceCost(currentKwh)
+      const currentCost = allocationById.get(appliance.id)?.estimatedCost || 0
       const efficiency = getEfficiencyRating(
         appliance.wattage,
         appliance.hoursPerDay,
@@ -72,7 +81,7 @@ export async function GET(request: NextRequest) {
         },
         optimizeSchedule: {
           description: 'Use during off-peak hours',
-          savings: currentCost * 0.15 // Assume 15% savings from peak avoidance
+          savings: 0
         }
       }
 
@@ -83,7 +92,11 @@ export async function GET(request: NextRequest) {
         appliance.daysPerMonth,
         appliance.type
       )
-      scenarios.reduceHours.savings = currentCost - calculateApplianceCost(reducedKwh)
+      scenarios.reduceHours.savings = estimateHouseholdSavingsFromApplianceDelta(
+        totalHouseholdKwh,
+        currentKwh,
+        reducedKwh
+      )
 
       // Calculate inverter upgrade savings
       if (scenarios.upgradeToInverter.applicable) {
@@ -93,13 +106,22 @@ export async function GET(request: NextRequest) {
           appliance.daysPerMonth,
           'Inverter'
         )
-        scenarios.upgradeToInverter.savings = currentCost - calculateApplianceCost(inverterKwh)
+        scenarios.upgradeToInverter.savings = estimateHouseholdSavingsFromApplianceDelta(
+          totalHouseholdKwh,
+          currentKwh,
+          inverterKwh
+        )
       }
+      scenarios.optimizeSchedule.savings = estimateHouseholdSavingsFromApplianceDelta(
+        totalHouseholdKwh,
+        currentKwh,
+        currentKwh * 0.9
+      )
       
-            const suggestions = generateOptimizationSuggestions({ ...appliance, estimatedKwh: appliance.estimatedKwh ?? undefined, contribution: appliance.contribution || 0 })
+      const suggestions = generateOptimizationSuggestions({ ...appliance, estimatedKwh: appliance.estimatedKwh ?? undefined, contribution: appliance.contribution || 0 })
       const totalPotentialSavings = Object.values(scenarios)
         .filter(s => ('applicable' in s ? s.applicable !== false : true))
-        .reduce((sum, s) => sum + s.savings, 0)
+        .reduce((max, s) => Math.max(max, s.savings), 0)
 
       return {
         appliance: {
@@ -216,6 +238,13 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const beforeTotalKwhAgg = await prisma.appliance.aggregate({
+      where: { userId: session.user.id },
+      _sum: { estimatedKwh: true }
+    })
+    const oldTotalKwh = beforeTotalKwhAgg._sum.estimatedKwh || 0
+    const oldTotalCost = tariffEngine(oldTotalKwh).totalCost
+
     // Update the appliance
     const updatedAppliance = await prisma.appliance.update({
       where: { id: applianceId },
@@ -225,20 +254,35 @@ export async function POST(request: NextRequest) {
     // Recalculate contributions for all user appliances
     await recalculateUserContributions(session.user.id)
 
-    // Calculate savings
-    const oldCost = calculateApplianceCost(appliance.estimatedKwh || 0)
-    const newCost = calculateApplianceCost(updatedAppliance.estimatedKwh || 0)
-    const savings = oldCost - newCost
+    const afterAppliances = await prisma.appliance.findMany({
+      where: { userId: session.user.id },
+      select: { id: true, estimatedKwh: true }
+    })
+    const afterPortfolio = allocateAppliancePortfolioCosts(
+      afterAppliances.map(item => ({
+        id: item.id,
+        estimatedKwh: item.estimatedKwh || 0
+      }))
+    )
+    const updatedAllocation = afterPortfolio.allocations.find(item => item.id === updatedAppliance.id)
+
+    const newTotalKwh = afterPortfolio.totalKwh
+    const newTotalCost = tariffEngine(newTotalKwh).totalCost
+    const savings = Math.max(0, oldTotalCost - newTotalCost)
 
     return NextResponse.json({
       success: true,
       data: {
-        appliance: updatedAppliance,
+        appliance: {
+          ...updatedAppliance,
+          estimatedCost: updatedAllocation?.estimatedCost || 0,
+          costPerKwh: updatedAllocation?.costPerKwh || 0
+        },
         optimization: {
           type: optimizationType,
-          savings: Math.round(savings),
-          oldCost: Math.round(oldCost),
-          newCost: Math.round(newCost)
+          savings: Math.round(savings * 100) / 100,
+          oldCost: Math.round(oldTotalCost * 100) / 100,
+          newCost: Math.round(newTotalCost * 100) / 100
         }
       }
     })

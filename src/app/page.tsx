@@ -1,392 +1,348 @@
 'use client'
+
 import React from 'react'
 import Link from 'next/link'
-import { 
-  Zap, 
-  TrendingUp, 
-  Shield, 
-  Target, 
+import {
+  Activity,
   ArrowRight,
-  Star,
-  CheckCircle,
-  Mail,
-  Phone,
-  MapPin,
-  Sparkles,
   BarChart3,
   Brain,
-  Lightbulb
+  CheckCircle2,
+  Clock3,
+  Cpu,
+  Gauge,
+  Layers3,
+  LineChart,
+  ShieldCheck,
+  Sparkles,
+  Target,
+  Zap,
 } from 'lucide-react'
+
 import Button from '../components/ui/Button'
 import Card from '../components/ui/Card'
-import Input from '../components/ui/Input'
+
+const platformMetrics = [
+  { label: 'Households + SMBs', value: '50K+' },
+  { label: 'Verified Savings', value: 'Rs 2.5B+' },
+  { label: 'Forecast Accuracy', value: '96%' },
+  { label: 'System Availability', value: '99.9%' },
+]
+
+const capabilityCards = [
+  {
+    icon: Brain,
+    title: 'AI Consumption Intelligence',
+    description: 'Detect waste patterns, estimate upcoming bills, and get model-driven interventions before costs spike.',
+  },
+  {
+    icon: BarChart3,
+    title: 'Precision Analytics',
+    description: 'Track month-to-date usage, day-level trends, and device-level attribution in one unified interface.',
+  },
+  {
+    icon: Target,
+    title: 'Optimization Playbooks',
+    description: 'Turn insights into action with structured daily plans to control slabs and reduce avoidable spend.',
+  },
+  {
+    icon: ShieldCheck,
+    title: 'Secure by Design',
+    description: 'Reliable platform controls with strong session security and private handling of operational data.',
+  },
+]
+
+const workflowSteps = [
+  {
+    title: 'Connect your meter data',
+    detail: 'Start with clean reading entries and appliance profiles to build a reliable usage baseline.',
+  },
+  {
+    title: 'Review model output',
+    detail: 'See how current patterns affect forecasted cost and where load concentration is forming.',
+  },
+  {
+    title: 'Execute optimization',
+    detail: 'Apply high-impact recommendations, then validate improvement in the next readings cycle.',
+  },
+]
+
+const signalRibbon = [
+  { icon: Activity, title: 'Live anomaly checks', text: 'Real-time detection across usage stream.' },
+  { icon: LineChart, title: 'Forecast model updates', text: 'Continuous re-forecast with latest readings.' },
+  { icon: Layers3, title: 'Device attribution', text: 'Map spend concentration by appliance group.' },
+  { icon: Clock3, title: 'Action windows', text: 'Identify best timing to avoid slab jumps.' },
+]
+
+const partnerMarks = ['NOVA GRID', 'AXIS ENERGY', 'K-WAVE', 'LUMEN OPS', 'POWERSTACK']
 
 const LandingPage: React.FC = () => {
-  const features = [
-    {
-      icon: Brain,
-      title: 'AI-Powered Insights',
-      description: 'Advanced machine learning algorithms analyze your usage patterns and provide intelligent recommendations.',
-      gradient: 'from-primary to-accent-cyan'
-    },
-    {
-      icon: BarChart3,
-      title: 'Predictive Analytics',
-      description: 'Accurate bill forecasting and usage predictions help you plan and optimize your electricity consumption.',
-      gradient: 'from-accent-blue to-accent-purple'
-    },
-    {
-      icon: Lightbulb,
-      title: 'Smart Optimization',
-      description: 'Intelligent device management and scheduling recommendations to maximize efficiency and savings.',
-      gradient: 'from-accent-amber to-accent-pink'
-    },
-    {
-      icon: Shield,
-      title: 'Enterprise Security',
-      description: 'Bank-grade security with end-to-end encryption ensures your data remains private and protected.',
-      gradient: 'from-accent-emerald to-primary'
-    }
-  ]
-
-  const testimonials = [
-    {
-      name: 'Ahmad Hassan',
-      role: 'Tech Executive, Karachi',
-      content: 'Volt transformed how I manage electricity costs. The AI insights are incredibly accurate and saved me 35% on bills.',
-      rating: 5,
-      avatar: '👨‍💼'
-    },
-    {
-      name: 'Fatima Sheikh',
-      role: 'Business Owner, Lahore',
-      content: 'The dual-meter optimization is brilliant. Managing multiple properties has never been this efficient and cost-effective.',
-      rating: 5,
-      avatar: '👩‍💼'
-    },
-    {
-      name: 'Ali Ahmed',
-      role: 'Software Engineer, Islamabad',
-      content: 'As a tech professional, I appreciate the sophisticated analytics and clean interface. Truly premium experience.',
-      rating: 5,
-      avatar: '👨‍💻'
-    }
-  ]
-
-  const stats = [
-    { value: '50K+', label: 'Active Users' },
-    { value: '₨2.5M+', label: 'Total Savings' },
-    { value: '99.9%', label: 'Uptime' },
-    { value: '4.9★', label: 'User Rating' }
-  ]
-
   return (
-    <div className="min-h-screen bg-background overflow-hidden">
-      {/* Background Effects */}
-      <div className="fixed inset-0 mesh-gradient pointer-events-none" />
-      <div className="fixed inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(0,212,170,0.1),transparent_70%)] pointer-events-none" />
-      
-      {/* Navigation */}
-      <nav className="relative z-50 glass-card border-b border-border/50 sticky top-0">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="flex items-center justify-between h-20">
-            <div className="flex items-center space-x-3">
-              <div className="relative">
-              
-                {/* Logo */}
-                <Link href="/" className="flex items-center space-x-3">
-                  {/* Transparent wrapper */}
-                  <div className="p-3 rounded-2xl bg-transparent">
-                    {/* Inline SVG with explicit Tailwind color hexes */}
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24"
-                      className="h-6 w-6"
-                    >
-                      <defs>
-                        <linearGradient id="zap-grad" x1="0%" y1="0%" x2="100%" y2="0%">
-                          {/* Replace these with your exact Tailwind primary/accent-cyan hexes */}
-                          <stop offset="0%" stopColor="#0ee9abff" />
-                          <stop offset="100%" stopColor="#06b6d4" />
-                        </linearGradient>
-                      </defs>
-                
-                      {/* Lucide-react “Zap” polygon path */}
-                      <polygon
-                        points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"
-                        fill="url(#zap-grad)"
-                      />
-                    </svg>
-                  </div>
-                
-                  <span className="text-2xl font-bold text-foreground font-sora">Volt</span>
-                </Link>
-                
-              </div>
-             
-            </div>
-            <div className="hidden md:flex items-center space-x-8">
-              <a href="#features" className="nav-link">Features</a>
-              <a href="#testimonials" className="nav-link">Reviews</a>
-              <a href="#pricing" className="nav-link">Pricing</a>
-            </div>
-            <div className="flex items-center space-x-4">
-              <Link href="/login">
-                <Button variant="ghost" size="md">Sign In</Button>
-              </Link>
-              <Link href="/signup">
-                <Button size="md" className="premium-button">
-                  Get Started
-                  <ArrowRight className="ml-2 h-5 w-5" />
-                </Button>
-              </Link>
-            </div>
-          </div>
-        </div>
-      </nav>
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute -left-24 top-0 h-[22rem] w-[22rem] rounded-full bg-cyan-500/12 blur-[120px]" />
+        <div className="absolute right-0 top-1/4 h-[26rem] w-[26rem] rounded-full bg-primary/10 blur-[140px]" />
+        <div className="absolute bottom-0 left-1/3 h-[20rem] w-[20rem] rounded-full bg-accent-blue/8 blur-[120px]" />
+        <div className="absolute inset-0 opacity-[0.16] [background-image:linear-gradient(rgba(148,163,184,0.12)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.12)_1px,transparent_1px)] [background-size:48px_48px]" />
+      </div>
 
-      {/* Hero Section */}
-      <section className="relative pt-20 pb-32">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center space-y-12 animate-fade-in">
-            <div className="space-y-8">
-              <div className="inline-flex items-center space-x-2 px-4 py-2 rounded-full bg-primary/10 border border-primary/20 text-primary">
-                <Sparkles className="h-4 w-4" />
-                <span className="text-sm font-medium">AI-Powered Electricity Management</span>
-              </div>
-              
-              <h1 className="text-6xl md:text-8xl font-bold text-foreground leading-tight font-sora">
-                Smart Energy
-                <br />
-                <span className="gradient-text">Intelligence</span>
-              </h1>
-              
-              <p className="text-xl md:text-2xl text-foreground-secondary max-w-4xl mx-auto leading-relaxed">
-                Transform your electricity management with AI-powered insights, predictive analytics, 
-                and intelligent optimization designed for Pakistani households and businesses.
-              </p>
+      <header className="sticky top-0 z-50 border-b border-white/10 bg-background/70 backdrop-blur-2xl">
+        <div className="mx-auto flex h-20 w-full max-w-7xl items-center justify-between px-4 md:px-6">
+          <Link href="/" className="group flex items-center gap-3">
+            <span className="relative flex h-11 w-11 items-center justify-center rounded-2xl border border-cyan-400/35 bg-gradient-to-br from-cyan-500/20 to-primary/20">
+              <Zap className="h-5 w-5 text-cyan-200 transition-transform duration-300 group-hover:scale-110" />
+            </span>
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.24em] text-foreground-tertiary">Energy OS</p>
+              <p className="font-sora text-xl font-bold text-foreground">Volt</p>
             </div>
-            
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-6">
-              <Link href="/signup">
-                <Button size="lg" className="premium-button text-lg px-12 py-6">
-                  Start Free Trial
-                  <ArrowRight className="ml-3 h-6 w-6" />
-                </Button>
-              </Link>
-              <Button variant="outline" size="lg" className="text-lg px-12 py-6 border-border-light hover:border-primary">
-                Watch Demo
+          </Link>
+
+          <nav className="hidden items-center gap-6 text-sm text-foreground-secondary md:flex">
+            <a href="#capabilities" className="hover:text-foreground">
+              Capabilities
+            </a>
+            <a href="#workflow" className="hover:text-foreground">
+              Workflow
+            </a>
+            <a href="#launch" className="hover:text-foreground">
+              Launch
+            </a>
+          </nav>
+
+          <div className="flex items-center gap-3">
+            <Link href="/login">
+              <Button variant="ghost" size="sm">
+                Sign In
               </Button>
-            </div>
-
-            <div className="flex items-center justify-center space-x-12 text-foreground-tertiary">
-              <div className="flex items-center space-x-2">
-                <CheckCircle className="h-5 w-5 text-primary" />
-                <span>30-day free trial</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <CheckCircle className="h-5 w-5 text-primary" />
-                <span>No credit card required</span>
-              </div>
-              <div className="flex items-center space-x-2">
-                <CheckCircle className="h-5 w-5 text-primary" />
-                <span>Cancel anytime</span>
-              </div>
-            </div>
+            </Link>
+            <Link href="/signup">
+              <Button size="sm">
+                Get Started
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            </Link>
           </div>
         </div>
-      </section>
+      </header>
 
-      {/* Stats Section */}
-      <section className="relative py-20">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="grid md:grid-cols-4 gap-8">
-            {stats.map((stat, index) => (
-              <div key={index} className="text-center space-y-2 animate-fade-in" style={{ animationDelay: `${index * 0.1}s` }}>
-                <div className="text-4xl md:text-5xl font-bold gradient-text font-sora">{stat.value}</div>
-                <div className="text-foreground-secondary">{stat.label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Features Section */}
-      <section id="features" className="relative py-32">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center space-y-6 mb-20">
-            <h2 className="text-5xl md:text-6xl font-bold text-foreground font-sora">
-              Powerful <span className="gradient-text">Features</span>
-            </h2>
-            <p className="text-xl text-foreground-secondary max-w-3xl mx-auto">
-              Advanced technology meets elegant design to deliver the ultimate electricity management experience
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-2 gap-8">
-            {features.map((feature, index) => (
-              <Card key={index} className="group card-premium animate-fade-in">
-               <div
-                className="inner-animation-wrapper"
-                style={{ animationDelay: `${index * 0.2}s` }}
-              >
-   <div className="space-y-6">
-                  <div className="relative">
-                    <div className={`absolute inset-0 bg-gradient-to-r ${feature.gradient} rounded-2xl blur-xl opacity-20 group-hover:opacity-30 transition-opacity duration-500`} />
-                    <div className={`relative bg-gradient-to-r ${feature.gradient} p-4 rounded-2xl w-fit`}>
-                      <feature.icon className="h-8 w-8 text-white" />
-                    </div>
-                  </div>
-                  <div className="space-y-4">
-                    <h3 className="text-2xl font-semibold text-foreground font-sora">{feature.title}</h3>
-                    <p className="text-foreground-secondary leading-relaxed text-lg">{feature.description}</p>
-                  </div>
-                </div>
-  </div>
-                
-              </Card>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Testimonials Section */}
-      <section id="testimonials" className="relative py-32">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="text-center space-y-6 mb-20">
-            <h2 className="text-5xl md:text-6xl font-bold text-foreground font-sora">
-              Trusted by <span className="gradient-text">Thousands</span>
-            </h2>
-            <p className="text-xl text-foreground-secondary max-w-3xl mx-auto">
-              Join the growing community of satisfied customers who have transformed their energy management
-            </p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-8">
-            {testimonials.map((testimonial, index) => (
-              <Card key={index} className="card-premium animate-fade-in" >
-                <div
-    className="inner-animation-wrapper"
-    style={{ animationDelay: `${index * 0.2}s` }}
-  ><div className="space-y-6">
-                  <div className="flex items-center space-x-1">
-                    {[...Array(testimonial.rating)].map((_, i) => (
-                      <Star key={i} className="h-5 w-5 text-accent-amber fill-current" />
-                    ))}
-                  </div>
-                  <p className="text-foreground-secondary italic text-lg leading-relaxed">"{testimonial.content}"</p>
-                  <div className="flex items-center space-x-4">
-                    <div className="text-3xl">{testimonial.avatar}</div>
-                    <div>
-                      <p className="font-semibold text-foreground text-lg">{testimonial.name}</p>
-                      <p className="text-foreground-tertiary">{testimonial.role}</p>
-                    </div>
-                  </div>
-                </div>
-    {/* your card contents */}
-  </div>
-                
-              </Card>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* CTA Section */}
-      <section className="relative py-32">
-        <div className="max-w-4xl mx-auto px-6">
-          <Card className="card-premium text-center gradient-border">
+      <main className="relative">
+        <section className="px-4 pb-14 pt-16 md:px-6 md:pt-20">
+          <div className="mx-auto grid w-full max-w-7xl items-center gap-8 lg:grid-cols-2">
             <div className="space-y-8">
+              <div className="inline-flex items-center gap-2 rounded-full border border-cyan-500/25 bg-cyan-500/10 px-4 py-2 text-xs uppercase tracking-[0.18em] text-cyan-100">
+                <Sparkles className="h-3.5 w-3.5" />
+                Advanced Energy Intelligence
+              </div>
+
               <div className="space-y-4">
-                <h2 className="text-4xl md:text-5xl font-bold text-foreground font-sora">
-                  Ready to <span className="gradient-text">Transform</span> Your Energy?
-                </h2>
-                <p className="text-xl text-foreground-secondary">
-                  Join thousands of users who are already saving money and optimizing their electricity usage
+                <h1 className="font-sora text-4xl font-bold leading-tight md:text-6xl">
+                  A premium control plane for
+                  <span className="block bg-gradient-to-r from-cyan-200 via-white to-emerald-200 bg-clip-text text-transparent">
+                    high-precision electricity operations.
+                  </span>
+                </h1>
+                <p className="max-w-2xl text-base text-foreground-secondary md:text-lg">
+                  Volt combines high-precision analytics, AI forecasting, and optimization workflows so every
+                  operational decision is based on clean data and measurable impact.
                 </p>
               </div>
-              <div className="flex flex-col sm:flex-row gap-4 max-w-md mx-auto">
-                <Input 
-                  type="email" 
-                  placeholder="Enter your email address" 
-                  className="flex-1"
-                />
-                <Button className="premium-button">
-                  Get Started
-                  <ArrowRight className="ml-2 h-5 w-5" />
-                </Button>
-              </div>
-              <p className="text-sm text-foreground-muted">
-                Start your 30-day free trial. No credit card required.
-              </p>
-            </div>
-          </Card>
-        </div>
-      </section>
 
-      {/* Footer */}
-      <footer className="relative border-t border-border/50 bg-background-secondary/50 backdrop-blur-xl">
-        <div className="max-w-7xl mx-auto px-6 py-16">
-          <div className="grid md:grid-cols-4 gap-12">
-            <div className="space-y-6">
-              <div className="flex items-center space-x-3">
-                <div className="relative">
-                  <div className="absolute inset-0 bg-gradient-to-r from-primary to-accent-cyan rounded-2xl blur-lg opacity-50" />
-                  <div className="relative bg-gradient-to-r from-primary to-accent-cyan p-3 rounded-2xl">
-                    <Zap className="h-6 w-6 text-white" />
+              <div className="flex flex-col gap-3 sm:flex-row">
+                <Link href="/signup">
+                  <Button size="lg">
+                    Launch Workspace
+                    <ArrowRight className="h-5 w-5" />
+                  </Button>
+                </Link>
+                <Link href="/dashboard">
+                  <Button variant="outline" size="lg" className="border-white/15 bg-white/[0.03] text-foreground">
+                    Preview Dashboard
+                  </Button>
+                </Link>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                {['No noisy dashboards', 'Actionable AI guidance', 'Built for scale'].map((item) => (
+                  <div key={item} className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm">
+                    <CheckCircle2 className="h-4 w-4 text-cyan-200" />
+                    <span className="text-foreground-secondary">{item}</span>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                {partnerMarks.map((item) => (
+                  <span
+                    key={item}
+                    className="rounded-lg border border-white/10 bg-white/[0.02] px-3 py-1.5 text-[11px] tracking-[0.16em] text-foreground-tertiary"
+                  >
+                    {item}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            <div className="relative">
+              <Card className="border border-white/10 bg-[#0f1727]/80">
+                <div className="space-y-5">
+                  <div className="flex items-center justify-between">
+                    <h2 className="font-sora text-xl font-semibold">Live Command Center</h2>
+                    <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-xs text-emerald-200">
+                      Stable
+                    </span>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {[
+                      { icon: Gauge, label: 'MTD Usage', value: '318 kWh' },
+                      { icon: Zap, label: 'Forecast Bill', value: 'Rs 18,420' },
+                      { icon: Cpu, label: 'AI Confidence', value: '91%' },
+                      { icon: Target, label: 'Potential Savings', value: 'Rs 3,200' },
+                    ].map((item) => (
+                      <div key={item.label} className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                        <item.icon className="h-4 w-4 text-cyan-200" />
+                        <p className="mt-2 text-xs uppercase tracking-[0.14em] text-foreground-tertiary">{item.label}</p>
+                        <p className="mt-1 text-lg font-semibold text-foreground">{item.value}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                    <div className="mb-3 flex items-center justify-between">
+                      <p className="text-xs uppercase tracking-[0.14em] text-foreground-tertiary">Forecast Momentum</p>
+                      <p className="text-xs text-cyan-200">+4.2% optimization gain</p>
+                    </div>
+                    <div className="flex items-end gap-1.5">
+                      {[22, 34, 29, 46, 40, 52, 61, 58, 66, 71].map((height, index) => (
+                        <div
+                          key={`bar-${index}`}
+                          className="w-full rounded-md bg-gradient-to-t from-cyan-500/35 to-cyan-200/70"
+                          style={{ height: `${height}px` }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-cyan-500/25 bg-cyan-500/10 p-4 text-sm text-cyan-100">
+                    Optimization signal: move high-load appliance usage to off-peak window to reduce projected slab jump.
                   </div>
                 </div>
-                <span className="text-xl font-bold text-foreground font-sora">Volt</span>
+              </Card>
+
+              <div className="absolute -right-4 -top-4 hidden rounded-xl border border-white/10 bg-[#0e1628]/90 p-3 text-xs text-foreground-secondary shadow-premium md:block">
+                <p className="text-cyan-200">AI Watch</p>
+                <p className="mt-1">3 high-priority actions active</p>
               </div>
-              <p className="text-foreground-secondary leading-relaxed">
-                AI-powered electricity management platform designed for the modern Pakistani household and business.
-              </p>
-            </div>
-
-            <div className="space-y-6">
-              <h3 className="font-semibold text-foreground text-lg">Product</h3>
-              <ul className="space-y-3 text-foreground-secondary">
-                <li><Link href="#" className="hover:text-foreground transition-colors">Features</Link></li>
-                <li><Link href="#" className="hover:text-foreground transition-colors">Pricing</Link></li>
-                <li><Link href="#" className="hover:text-foreground transition-colors">Demo</Link></li>
-                <li><Link href="#" className="hover:text-foreground transition-colors">API</Link></li>
-              </ul>
-            </div>
-
-            <div className="space-y-6">
-              <h3 className="font-semibold text-foreground text-lg">Support</h3>
-              <ul className="space-y-3 text-foreground-secondary">
-                <li><Link href="#" className="hover:text-foreground transition-colors">Help Center</Link></li>
-                <li><Link href="#" className="hover:text-foreground transition-colors">Contact</Link></li>
-                <li><Link href="#" className="hover:text-foreground transition-colors">Privacy</Link></li>
-                <li><Link href="#" className="hover:text-foreground transition-colors">Terms</Link></li>
-              </ul>
-            </div>
-
-            <div className="space-y-6">
-              <h3 className="font-semibold text-foreground text-lg">Contact</h3>
-              <ul className="space-y-3 text-foreground-secondary">
-                <li className="flex items-center space-x-3">
-                  <Mail className="h-4 w-4" />
-                  <span>hello@volt.pk</span>
-                </li>
-                <li className="flex items-center space-x-3">
-                  <Phone className="h-4 w-4" />
-                  <span>+92 300 1234567</span>
-                </li>
-                <li className="flex items-center space-x-3">
-                  <MapPin className="h-4 w-4" />
-                  <span>Karachi, Pakistan</span>
-                </li>
-              </ul>
             </div>
           </div>
+        </section>
 
-          <div className="border-t border-border/50 mt-16 pt-8 text-center text-foreground-tertiary">
-            <p>&copy; 2024 Volt. All rights reserved. Made with ⚡ in Pakistan.</p>
+        <section className="px-4 pb-10 md:px-6">
+          <div className="mx-auto mb-4 grid w-full max-w-7xl gap-3 md:grid-cols-2 xl:grid-cols-4">
+            {signalRibbon.map((item) => (
+              <div key={item.title} className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+                <item.icon className="h-4 w-4 text-cyan-200" />
+                <p className="mt-2 text-sm font-semibold text-foreground">{item.title}</p>
+                <p className="mt-1 text-xs text-foreground-secondary">{item.text}</p>
+              </div>
+            ))}
           </div>
-        </div>
-      </footer>
+        </section>
+
+        <section className="px-4 pb-14 md:px-6">
+          <div className="mx-auto grid w-full max-w-7xl gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {platformMetrics.map((metric) => (
+              <Card key={metric.label} className="border border-white/10 bg-gradient-to-br from-[#101a2c]/85 to-[#0b1423]/85">
+                <p className="text-xs uppercase tracking-[0.16em] text-foreground-tertiary">{metric.label}</p>
+                <p className="mt-3 font-sora text-3xl font-semibold text-foreground">{metric.value}</p>
+              </Card>
+            ))}
+          </div>
+        </section>
+
+        <section id="capabilities" className="px-4 pb-14 md:px-6">
+          <div className="mx-auto w-full max-w-7xl space-y-6">
+            <div className="space-y-3">
+              <p className="text-xs uppercase tracking-[0.2em] text-foreground-tertiary">Capabilities</p>
+              <h2 className="font-sora text-3xl font-bold md:text-4xl">Designed for clean, high-impact decisions</h2>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              {capabilityCards.map((feature) => (
+                <Card key={feature.title} className="border border-white/10 bg-[#0f1727]/75">
+                  <feature.icon className="h-6 w-6 text-cyan-200" />
+                  <h3 className="mt-4 font-sora text-xl font-semibold text-foreground">{feature.title}</h3>
+                  <p className="mt-2 text-sm text-foreground-secondary md:text-base">{feature.description}</p>
+                </Card>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section id="workflow" className="px-4 pb-16 md:px-6">
+          <div className="mx-auto w-full max-w-7xl space-y-6">
+            <div className="space-y-3">
+              <p className="text-xs uppercase tracking-[0.2em] text-foreground-tertiary">Workflow</p>
+              <h2 className="font-sora text-3xl font-bold md:text-4xl">Simple operating rhythm</h2>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              {workflowSteps.map((step, index) => (
+                <Card key={step.title} className="border border-white/10 bg-[#0f1727]/75">
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-cyan-400/35 bg-cyan-500/10 text-sm font-semibold text-cyan-100">
+                    {index + 1}
+                  </span>
+                  <h3 className="mt-4 font-sora text-xl font-semibold text-foreground">{step.title}</h3>
+                  <p className="mt-2 text-sm text-foreground-secondary md:text-base">{step.detail}</p>
+                </Card>
+              ))}
+            </div>
+
+            <Card className="border border-white/10 bg-[#0d1628]/80">
+              <div className="grid gap-5 md:grid-cols-3">
+                {[
+                  { title: 'Input quality', value: '98.7%', detail: 'Meter chain continuity' },
+                  { title: 'Model reliability', value: '91.0%', detail: 'Current confidence index' },
+                  { title: 'Execution readiness', value: '7 actions', detail: 'This week optimized tasks' },
+                ].map((item) => (
+                  <div key={item.title} className="rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                    <p className="text-xs uppercase tracking-[0.14em] text-foreground-tertiary">{item.title}</p>
+                    <p className="mt-2 text-2xl font-semibold text-foreground">{item.value}</p>
+                    <p className="mt-1 text-xs text-foreground-secondary">{item.detail}</p>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          </div>
+        </section>
+
+        <section id="launch" className="px-4 pb-20 md:px-6">
+          <div className="mx-auto w-full max-w-5xl">
+            <section className="rounded-3xl border border-white/10 bg-gradient-to-br from-[#0a1323]/95 via-[#0f1a2d]/95 to-[#081220]/95 p-8 shadow-premium md:p-10">
+              <div className="space-y-6 text-center">
+                <h2 className="font-sora text-3xl font-bold md:text-4xl">Ready to run your energy stack with precision?</h2>
+                <p className="mx-auto max-w-2xl text-sm text-foreground-secondary md:text-base">
+                  Start with your existing meter readings, clean up device inventory, and let Volt produce a structured
+                  optimization plan.
+                </p>
+                <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
+                  <Link href="/signup">
+                    <Button size="lg">
+                      Create Account
+                      <ArrowRight className="h-5 w-5" />
+                    </Button>
+                  </Link>
+                  <Link href="/login">
+                    <Button variant="outline" size="lg" className="border-white/15 bg-white/[0.03] text-foreground">
+                      Sign In
+                    </Button>
+                  </Link>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
     </div>
   )
 }

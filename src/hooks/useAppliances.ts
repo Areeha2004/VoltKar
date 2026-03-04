@@ -14,6 +14,12 @@ export interface Appliance {
   estimatedCost: number
   efficiency: string
   costPerKwh: number
+  usageSharePct?: number
+  billSharePct?: number
+  attributedUsageMtdKwh?: number
+  attributedCostMtdPkr?: number
+  attributedUsageForecastKwh?: number
+  attributedCostForecastPkr?: number
   createdAt: string
   optimizationSuggestions?: string[]
 }
@@ -24,6 +30,27 @@ export interface ApplianceSummary {
   totalCost: number
   averageEfficiency: number
   categories: string[]
+  costModel?: string
+  meter?: {
+    mtdUsageKwh: number
+    mtdCostPkr: number
+    forecastUsageKwh: number
+    forecastCostPkr: number
+    timeframeLabels?: {
+      mtd: string
+      prevMonthFull: string
+      forecast: string
+    }
+  }
+  consistency?: {
+    deviceEstimatedMonthlyKwh: number
+    deviceExpectedMtdKwh: number
+    meterMtdUsageKwh: number
+    meterForecastUsageKwh: number
+    forecastDeltaKwh: number
+    forecastDeltaPct: number
+    calibrationFactorMtd: number
+  }
 }
 
 export interface CreateApplianceData {

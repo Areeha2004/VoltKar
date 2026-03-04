@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
-import { authOptions } from '../../auth/[...nextauth]/route'
+import { authOptions } from '@/lib/authOptions'
 import { getAnalyticsTimeSeries, computeStatsBundle } from '@/lib/statService'
 
 export async function GET(request: NextRequest) {
@@ -20,13 +20,29 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       data: {
+        timeframeLabels: stats.timeframeLabels,
         mtd: stats.mtd,
         forecast: stats.forecast,
         prevMonthFull: stats.prevMonthFull,
         window: stats.window,
         weeklyBreakdown: timeSeries.weeklyBreakdown,
         dailyUsage: timeSeries.dailyUsage,
-        budgetProgress: timeSeries.budgetProgress
+        budgetProgress: timeSeries.budgetProgress,
+        usage: {
+          actualToDateKwh: stats.mtd.usage_kwh,
+          projectedKwh: stats.forecast.usage_kwh,
+          averageDailyKwh:
+            stats.window.daysElapsed > 0 ? Math.round((stats.mtd.usage_kwh / stats.window.daysElapsed) * 100) / 100 : 0
+        },
+        period: {
+          month: stats.window.now.getMonth() + 1,
+          year: stats.window.now.getFullYear(),
+          labels: {
+            mtd: stats.timeframeLabels.mtd,
+            previousMonth: stats.timeframeLabels.prevMonthFull,
+            forecast: stats.timeframeLabels.forecast
+          }
+        }
       }
     })
 
@@ -38,3 +54,4 @@ export async function GET(request: NextRequest) {
     )
   }
 }
+

@@ -1,5 +1,5 @@
 "use client"
-import React, { useState,useEffect } from 'react'
+import React, { Suspense, useState,useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 
 import Link from 'next/link'
@@ -10,7 +10,7 @@ import Input from '../../components/ui/Input'
 import { signIn, signOut } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 
-const LoginPage: React.FC = () => {
+const LoginPageContent: React.FC = () => {
   const router = useRouter();
   const params = useSearchParams();
   const error = params.get("error");
@@ -201,4 +201,11 @@ const [msg,      setMsg]      = useState<string | null>(null);
     </div>
   )
 }
+
+const LoginPage: React.FC = () => (
+  <Suspense fallback={null}>
+    <LoginPageContent />
+  </Suspense>
+)
+
 export default LoginPage;

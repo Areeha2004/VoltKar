@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
@@ -44,7 +44,24 @@ const difficultyTone = (difficulty: string) => {
   return "text-emerald-300 bg-emerald-500/10";
 };
 
-const OptimizationPage: React.FC = () => {
+const OptimizationLoadingFallback: React.FC = () => (
+  <div className="min-h-screen bg-background text-foreground">
+    <Navbar />
+    <div className="flex">
+      <Sidebar />
+      <main className="flex flex-1 items-center justify-center px-6">
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-12 w-12 animate-spin rounded-full border-2 border-cyan-300/30 border-t-cyan-300" />
+          <p className="text-sm text-foreground-secondary">
+            Loading optimization center...
+          </p>
+        </div>
+      </main>
+    </div>
+  </div>
+);
+
+const OptimizationPageContent: React.FC = () => {
   const searchParams = useSearchParams();
   const fromDualMeter = searchParams.get("source") === "dual-meter";
   const meterIdFromQuery = searchParams.get("meterId");
@@ -194,22 +211,7 @@ const OptimizationPage: React.FC = () => {
   const confidence = Number(optimizationData?.metadata?.confidence || 0);
 
   if (loading) {
-    return (
-      <div className="min-h-screen bg-background text-foreground">
-        <Navbar />
-        <div className="flex">
-          <Sidebar />
-          <main className="flex flex-1 items-center justify-center px-6">
-            <div className="flex flex-col items-center gap-4">
-              <div className="h-12 w-12 animate-spin rounded-full border-2 border-cyan-300/30 border-t-cyan-300" />
-              <p className="text-sm text-foreground-secondary">
-                Loading optimization center...
-              </p>
-            </div>
-          </main>
-        </div>
-      </div>
-    );
+    return <OptimizationLoadingFallback />;
   }
 
   return (
@@ -609,5 +611,11 @@ const OptimizationPage: React.FC = () => {
     </div>
   );
 };
+
+const OptimizationPage: React.FC = () => (
+  <Suspense fallback={<OptimizationLoadingFallback />}>
+    <OptimizationPageContent />
+  </Suspense>
+);
 
 export default OptimizationPage;

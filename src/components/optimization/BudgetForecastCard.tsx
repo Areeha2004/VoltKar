@@ -174,10 +174,13 @@ const BudgetForecastCard: React.FC<BudgetForecastCardProps> = ({
                       borderRadius: '12px',
                       color: '#ffffff'
                     }}
-                    formatter={(value: any, name: string) => [
-                      name === 'cost' ? `Rs ${value.toLocaleString()}` : `${value} kWh`,
-                      name === 'cost' ? 'Cost' : 'Usage'
-                    ]}
+                    formatter={(value, name) => {
+                      const numericValue = typeof value === 'number' ? value : Number(value ?? 0)
+                      return [
+                        name === 'cost' ? `Rs ${numericValue.toLocaleString()}` : `${numericValue} kWh`,
+                        name === 'cost' ? 'Cost' : 'Usage'
+                      ]
+                    }}
                   />
                   <Bar dataKey="cost" fill="#00d4aa" radius={[4, 4, 0, 0]} />
                 </BarChart>

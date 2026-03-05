@@ -6,7 +6,7 @@ import { recalculateMeterReadingChain } from '@/lib/readingChain'
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await getServerSession(authOptions)
@@ -15,7 +15,7 @@ export async function PUT(
     }
 
     const { reading, week, month, year, date, isOfficialEndOfMonth, notes } = await request.json()
-    const readingId = params.id
+    const { id: readingId } = await params
 
     // Verify and load existing reading
     const existing = await prisma.meterReading.findFirst({
@@ -97,7 +97,7 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   try {
     const session = await getServerSession(authOptions)
@@ -105,7 +105,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const readingId = params.id
+    const { id: readingId } = await params
 
     const existing = await prisma.meterReading.findFirst({
       where: { id: readingId, userId: session.user.id },
@@ -125,4 +125,5 @@ export async function DELETE(
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
+
 

@@ -4,6 +4,8 @@ import { authOptions } from '@/lib/authOptions'
 import prisma from '@/lib/prisma'
 import { computeStatsBundle } from '@/lib/statService'
 
+export const dynamic = 'force-dynamic'
+
 type FeedSeverity = 'low' | 'medium' | 'high' | 'critical'
 
 interface FeedItem {

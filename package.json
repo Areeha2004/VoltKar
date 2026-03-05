@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "npm install --legacy-peer-deps && next build",
+    "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "test": "jest --watch",
@@ -20,12 +20,11 @@
     "next-auth": "^4.24.11",
     "react": "19.1.0",
     "react-dom": "19.1.0",
+    "react-is": "^19.2.4",
     "recharts": "^3.1.0"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
-    "@testing-library/jest-dom": "^6.1.4",
-    "@testing-library/react": "^14.1.2",
     "@types/bcrypt": "^6.0.0",
     "@types/jest": "^29.5.8",
     "@types/node": "^20",
@@ -42,3 +41,4 @@
     "typescript": "^5"
   }
 }
+

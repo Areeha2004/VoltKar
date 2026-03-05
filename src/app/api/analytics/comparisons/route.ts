@@ -3,6 +3,8 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/authOptions'
 import { computeStatsBundle, getAnalyticsTimeSeries } from '@/lib/statService'
 
+export const dynamic = 'force-dynamic'
+
 interface PeriodData {
   usage: number
   cost: number

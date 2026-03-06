@@ -1,5 +1,6 @@
 import prisma from './prisma'
 import { calculateUsage, tariffEngine } from './tariffEngine'
+import { getTariffConfigForUser } from './userTariff'
 
 /**
  * Recalculate usage and estimated cost for all readings of a meter
@@ -11,10 +12,14 @@ export async function recalculateMeterReadingChain(meterId: string): Promise<voi
     orderBy: [{ date: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     select: {
       id: true,
-      reading: true
+      reading: true,
+      userId: true
     }
   })
 
+  if (readings.length === 0) return
+
+  const tariffConfig = await getTariffConfigForUser(readings[0].userId)
   let previousReadingValue: number | null = null
 
   for (const current of readings) {
@@ -23,7 +28,7 @@ export async function recalculateMeterReadingChain(meterId: string): Promise<voi
         ? 0
         : calculateUsage(current.reading, previousReadingValue)
 
-    const estimatedCost = usage > 0 ? tariffEngine(usage).totalCost : 0
+    const estimatedCost = usage > 0 ? tariffEngine(usage, tariffConfig).totalCost : 0
 
     await prisma.meterReading.update({
       where: { id: current.id },

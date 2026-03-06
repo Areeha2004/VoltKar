@@ -10,6 +10,7 @@ import {
 } from '@/lib/applianceCalculations'
 import { computeStatsBundle } from '@/lib/statService'
 import { computeApplianceAttribution } from '@/lib/applianceAttribution'
+import { getTariffConfigForUser } from '@/lib/userTariff'
 
 export async function PUT(
   request: NextRequest,
@@ -89,12 +90,14 @@ export async function PUT(
       where: { userId: session.user.id },
       select: { id: true, estimatedKwh: true }
     })
-    const portfolio = allocateAppliancePortfolioCosts(
-      allAppliances.map(item => ({
-        id: item.id,
-        estimatedKwh: item.estimatedKwh || 0
-      }))
-    )
+	    const tariffConfig = await getTariffConfigForUser(session.user.id)
+	    const portfolio = allocateAppliancePortfolioCosts(
+	      allAppliances.map(item => ({
+	        id: item.id,
+	        estimatedKwh: item.estimatedKwh || 0
+	      })),
+        tariffConfig
+	    )
     const allocation = portfolio.allocations.find(item => item.id === finalAppliance?.id)
     const stats = await computeStatsBundle(session.user.id)
     const attribution = computeApplianceAttribution(

@@ -42,19 +42,19 @@ const CreateMeterModal: React.FC<CreateMeterModalProps> = ({ isOpen, onClose, on
   if (!isOpen) return null
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <Card className="w-full max-w-md">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm">
+      <Card className="w-full max-w-md border border-white/10 bg-[#0f1727]/95 backdrop-blur-xl">
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
-              <div className="bg-gradient-to-r from-primary to-accent-cyan p-2 rounded-xl">
+              <div className="rounded-xl bg-gradient-to-r from-cyan-400/80 via-primary to-emerald-400/80 p-2">
                 <Home className="h-5 w-5 text-white" />
               </div>
-              <h2 className="text-xl font-semibold text-foreground">Add New Meter</h2>
+              <h2 className="font-sora text-xl font-semibold text-foreground">Add New Meter</h2>
             </div>
             <button
               onClick={onClose}
-              className="p-2 rounded-lg hover:bg-background-card transition-colors"
+              className="rounded-lg p-2 transition-colors hover:bg-white/10"
             >
               <X className="h-5 w-5 text-foreground-secondary" />
             </button>
@@ -84,7 +84,7 @@ const CreateMeterModal: React.FC<CreateMeterModalProps> = ({ isOpen, onClose, on
             </div>
 
             {error && (
-              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20">
+              <div className="rounded-lg border border-red-500/20 bg-red-500/10 p-3">
                 <p className="text-sm text-red-400">{error}</p>
               </div>
             )}

@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/authOptions'
 import { computeStatsBundle } from '@/lib/statService'
 import { tariffEngine } from '@/lib/tariffEngine'
+import { getTariffConfigForUser } from '@/lib/userTariff'
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100
@@ -17,13 +18,14 @@ export async function GET(request: NextRequest) {
 
     const { searchParams } = new URL(request.url)
     const meterId = searchParams.get('meterId')
+    const tariffConfig = await getTariffConfigForUser(session.user.id)
 
     const stats = await computeStatsBundle(session.user.id, meterId || undefined)
 
     const expectedUsage = stats.forecast.usage_kwh
     const expectedCost = stats.forecast.cost_pkr
-    const mtdTariff = tariffEngine(stats.mtd.usage_kwh)
-    const forecastTariff = tariffEngine(expectedUsage)
+    const mtdTariff = tariffEngine(stats.mtd.usage_kwh, tariffConfig)
+    const forecastTariff = tariffEngine(expectedUsage, tariffConfig)
 
     const lowUsage =
       stats.forecast.method === 'actual' ? expectedUsage : Math.max(0, expectedUsage * 0.9)
@@ -33,14 +35,18 @@ export async function GET(request: NextRequest) {
     const lowCost =
       stats.forecast.method === 'actual'
         ? expectedCost
-        : round2(tariffEngine(lowUsage).totalCost)
+        : round2(tariffEngine(lowUsage, tariffConfig).totalCost)
     const highCost =
       stats.forecast.method === 'actual'
         ? expectedCost
-        : round2(tariffEngine(highUsage).totalCost)
+        : round2(tariffEngine(highUsage, tariffConfig).totalCost)
 
-    const savingsReduce10Cost = round2(tariffEngine(Math.max(0, expectedUsage * 0.9)).totalCost)
-    const savingsReduce20Cost = round2(tariffEngine(Math.max(0, expectedUsage * 0.8)).totalCost)
+    const savingsReduce10Cost = round2(
+      tariffEngine(Math.max(0, expectedUsage * 0.9), tariffConfig).totalCost
+    )
+    const savingsReduce20Cost = round2(
+      tariffEngine(Math.max(0, expectedUsage * 0.8), tariffConfig).totalCost
+    )
 
     const confidence =
       stats.forecast.method === 'actual'

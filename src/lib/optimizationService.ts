@@ -4,12 +4,14 @@ import {
   DEFAULT_TARIFF,
   getCurrentSlab,
   tariffEngine,
+  TariffConfig,
   TariffSlab
 } from './tariffEngine'
 import {
   allocateAppliancePortfolioCosts,
   estimateHouseholdSavingsFromApplianceDelta
 } from './applianceCalculations'
+import { getTariffConfigForUser } from './userTariff'
 
 type Priority = 'high' | 'medium' | 'low'
 
@@ -54,7 +56,8 @@ function priorityFromSavings(value: number): Priority {
 
 async function getMeterProjections(
   userId: string,
-  meterId?: string
+  meterId?: string,
+  tariffConfig: TariffConfig = DEFAULT_TARIFF
 ): Promise<MeterProjection[]> {
   const meters = await prisma.meter.findMany({
     where: { userId, ...(meterId ? { id: meterId } : {}) },
@@ -64,11 +67,11 @@ async function getMeterProjections(
   const projections = await Promise.all(
     meters.map(async meter => {
       const stats = await computeStatsBundle(userId, meter.id)
-      const slab = getCurrentSlab(stats.forecast.usage_kwh)
-      const slabIndex = slab?.index ?? DEFAULT_TARIFF.slabs.length - 1
-      const slabRate = slab?.slab.rate ?? DEFAULT_TARIFF.slabs[slabIndex].rate
-      const slabMin = slab?.slab.min ?? DEFAULT_TARIFF.slabs[slabIndex].min
-      const slabMax = slab?.slab.max ?? slabUpperBound(DEFAULT_TARIFF.slabs[slabIndex])
+      const slab = getCurrentSlab(stats.forecast.usage_kwh, tariffConfig)
+      const slabIndex = slab?.index ?? tariffConfig.slabs.length - 1
+      const slabRate = slab?.slab.rate ?? tariffConfig.slabs[slabIndex].rate
+      const slabMin = slab?.slab.min ?? tariffConfig.slabs[slabIndex].min
+      const slabMax = slab?.slab.max ?? slabUpperBound(tariffConfig.slabs[slabIndex])
       const headroomKwh = Number.isFinite(slabMax)
         ? round2(Math.max(0, slabMax - stats.forecast.usage_kwh))
         : 0
@@ -92,7 +95,10 @@ async function getMeterProjections(
   return projections
 }
 
-function buildLoadBalancingPlans(meters: MeterProjection[]) {
+function buildLoadBalancingPlans(
+  meters: MeterProjection[],
+  tariffConfig: TariffConfig = DEFAULT_TARIFF
+) {
   if (meters.length < 2) {
     return {
       recommended: false,
@@ -130,28 +136,28 @@ function buildLoadBalancingPlans(meters: MeterProjection[]) {
       if (shiftKwh < 5) continue
 
       const before =
-        tariffEngine(source.projectedUsage).totalCost +
-        tariffEngine(target.projectedUsage).totalCost
+        tariffEngine(source.projectedUsage, tariffConfig).totalCost +
+        tariffEngine(target.projectedUsage, tariffConfig).totalCost
       const after =
-        tariffEngine(Math.max(0, source.projectedUsage - shiftKwh)).totalCost +
-        tariffEngine(target.projectedUsage + shiftKwh).totalCost
+        tariffEngine(Math.max(0, source.projectedUsage - shiftKwh), tariffConfig).totalCost +
+        tariffEngine(target.projectedUsage + shiftKwh, tariffConfig).totalCost
       const estimatedSavings = round2(Math.max(0, before - after))
       if (estimatedSavings <= 0) continue
 
       source.projectedUsage = round2(Math.max(0, source.projectedUsage - shiftKwh))
-      source.projectedCost = round2(tariffEngine(source.projectedUsage).totalCost)
+      source.projectedCost = round2(tariffEngine(source.projectedUsage, tariffConfig).totalCost)
       target.projectedUsage = round2(target.projectedUsage + shiftKwh)
-      target.projectedCost = round2(tariffEngine(target.projectedUsage).totalCost)
+      target.projectedCost = round2(tariffEngine(target.projectedUsage, tariffConfig).totalCost)
       totalShiftKwh += shiftKwh
       totalSavingsPkr += estimatedSavings
 
-      const targetSlab = getCurrentSlab(target.projectedUsage)
+      const targetSlab = getCurrentSlab(target.projectedUsage, tariffConfig)
       const targetMax = targetSlab ? targetSlab.slab.max : Infinity
       target.headroomKwh = Number.isFinite(targetMax)
         ? round2(Math.max(0, targetMax - target.projectedUsage))
         : 0
 
-      const sourceSlab = getCurrentSlab(source.projectedUsage)
+      const sourceSlab = getCurrentSlab(source.projectedUsage, tariffConfig)
       const sourceMax = sourceSlab ? sourceSlab.slab.max : Infinity
       source.headroomKwh = Number.isFinite(sourceMax)
         ? round2(Math.max(0, sourceMax - source.projectedUsage))
@@ -184,7 +190,10 @@ function buildLoadBalancingPlans(meters: MeterProjection[]) {
   }
 }
 
-async function buildApplianceSavings(userId: string) {
+async function buildApplianceSavings(
+  userId: string,
+  tariffConfig: TariffConfig = DEFAULT_TARIFF
+) {
   const appliances = await prisma.appliance.findMany({
     where: { userId },
     orderBy: { estimatedKwh: 'desc' }
@@ -194,7 +203,8 @@ async function buildApplianceSavings(userId: string) {
     appliances.map(appliance => ({
       id: appliance.id,
       estimatedKwh: appliance.estimatedKwh || 0
-    }))
+    })),
+    tariffConfig
   )
   const allocationById = new Map(
     portfolio.allocations.map(item => [item.id, item])
@@ -209,16 +219,18 @@ async function buildApplianceSavings(userId: string) {
     const reduceHoursSavings = estimateHouseholdSavingsFromApplianceDelta(
       portfolio.totalKwh,
       currentKwh,
-      reduceHoursKwh
+      reduceHoursKwh,
+      tariffConfig
     )
     const inverterSavings =
       appliance.type.toLowerCase() === 'inverter'
-        ? 0
-        : estimateHouseholdSavingsFromApplianceDelta(
-            portfolio.totalKwh,
-            currentKwh,
-            inverterKwh
-          )
+          ? 0
+          : estimateHouseholdSavingsFromApplianceDelta(
+              portfolio.totalKwh,
+              currentKwh,
+              inverterKwh,
+              tariffConfig
+            )
     const bestSavings = round2(Math.max(reduceHoursSavings, inverterSavings))
     const recommendedAction =
       inverterSavings > reduceHoursSavings
@@ -297,12 +309,13 @@ export async function buildOptimizationPayload(params: {
   includeAppliances?: boolean
 }) {
   const { userId, meterId, budgetOverride, source, includeAppliances = true } = params
+  const tariffConfig = await getTariffConfigForUser(userId)
 
   const stats = await computeStatsBundle(userId, meterId)
-  const meterBreakdown = await getMeterProjections(userId, meterId)
-  const loadBalancing = buildLoadBalancingPlans(meterBreakdown)
+  const meterBreakdown = await getMeterProjections(userId, meterId, tariffConfig)
+  const loadBalancing = buildLoadBalancingPlans(meterBreakdown, tariffConfig)
   const applianceData = includeAppliances
-    ? await buildApplianceSavings(userId)
+    ? await buildApplianceSavings(userId, tariffConfig)
     : { appliances: [], savingsBreakdown: [], totalPotential: 0 }
 
   const parsedBudget = budgetOverride ?? null

@@ -1,3 +1,5 @@
+import { getTariffConfigForDisco } from './discoTariffs'
+
 export interface TariffSlab {
   min: number
   max: number
@@ -30,20 +32,7 @@ export interface CostBreakdown {
   }[]
 }
 
-export const DEFAULT_TARIFF: TariffConfig = {
-  slabs: [
-    { min: 0, max: 50, upTo: 50, rate: 3.95 },
-    { min: 51, max: 100, upTo: 100, rate: 7.74 },
-    { min: 101, max: 200, upTo: 200, rate: 10.06 },
-    { min: 201, max: 300, upTo: 300, rate: 18.15 },
-    { min: 301, max: 700, upTo: 700, rate: 22.71 },
-    { min: 701, max: Infinity, upTo: null, rate: 28.3 }
-  ],
-  fuelAdjPerUnit: 4.77,
-  fixedCharges: 200,
-  taxPercent: 17,
-  tvFee: 35
-}
+export const DEFAULT_TARIFF: TariffConfig = getTariffConfigForDisco('LESCO')
 
 function slabUpperBound(slab: TariffSlab): number {
   if (slab.upTo !== undefined) return slab.upTo ?? Infinity

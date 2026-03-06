@@ -3,6 +3,8 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/authOptions'
 import prisma from '@/lib/prisma'
 import { recalculateMeterReadingChain } from '@/lib/readingChain'
+import { isDemoTimeTravelEnabled } from '@/lib/demoMode'
+import { getDemoModeFromRequest } from '@/lib/demoModeServer'
 
 export async function GET(request: NextRequest) {
   try {
@@ -125,9 +127,10 @@ export async function POST(request: NextRequest) {
     if (Number.isNaN(readingDate.getTime())) {
       return NextResponse.json({ error: 'Invalid date' }, { status: 400 })
     }
+    const demoMode = getDemoModeFromRequest(request)
     const endOfToday = new Date()
     endOfToday.setHours(23, 59, 59, 999)
-    if (readingDate > endOfToday) {
+    if (!isDemoTimeTravelEnabled(demoMode) && readingDate > endOfToday) {
       return NextResponse.json({ error: 'Future dates are not allowed for meter readings' }, { status: 400 })
     }
 

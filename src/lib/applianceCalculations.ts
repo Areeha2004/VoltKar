@@ -4,6 +4,7 @@
  */
 
 import { tariffEngine } from './tariffEngine'
+import type { TariffConfig } from './tariffEngine'
 
 export interface ApplianceData {
   id: string
@@ -101,12 +102,15 @@ export function calculateContributions(appliances: ApplianceData[]): ApplianceCa
 /**
  * Calculate estimated cost for an appliance using tariff engine
  */
-export function calculateApplianceCost(estimatedKwh: number): number {
+export function calculateApplianceCost(
+  estimatedKwh: number,
+  tariffConfig?: TariffConfig
+): number {
   if (estimatedKwh <= 0) return 0
 
   // Variable-only cost model for appliance-level attribution.
   // Fixed charges are household-level and should not be multiplied per appliance.
-  const costBreakdown = tariffEngine(estimatedKwh)
+  const costBreakdown = tariffEngine(estimatedKwh, tariffConfig)
   const variableSubtotal = costBreakdown.energyCost + costBreakdown.fuelAdj
   const variableTax = variableSubtotal * 0.17
   return round2(variableSubtotal + variableTax)
@@ -117,7 +121,8 @@ export function calculateApplianceCost(estimatedKwh: number): number {
  * This avoids multiplying fixed charges/taxes per appliance while keeping totals coherent.
  */
 export function allocateAppliancePortfolioCosts(
-  appliances: ApplianceCostAllocationItem[]
+  appliances: ApplianceCostAllocationItem[],
+  tariffConfig?: TariffConfig
 ): {
   totalKwh: number
   totalCost: number
@@ -143,7 +148,7 @@ export function allocateAppliancePortfolioCosts(
     }
   }
 
-  const totalCost = round2(tariffEngine(totalKwh).totalCost)
+  const totalCost = round2(tariffEngine(totalKwh, tariffConfig).totalCost)
   const costPerKwh = totalCost / totalKwh
 
   return {
@@ -169,15 +174,16 @@ export function allocateAppliancePortfolioCosts(
 export function estimateHouseholdSavingsFromApplianceDelta(
   householdKwh: number,
   currentApplianceKwh: number,
-  newApplianceKwh: number
+  newApplianceKwh: number,
+  tariffConfig?: TariffConfig
 ): number {
   const safeHousehold = Math.max(0, Number(householdKwh) || 0)
   const safeCurrent = Math.max(0, Number(currentApplianceKwh) || 0)
   const safeNew = Math.max(0, Number(newApplianceKwh) || 0)
 
-  const before = tariffEngine(safeHousehold).totalCost
+  const before = tariffEngine(safeHousehold, tariffConfig).totalCost
   const afterTotalKwh = Math.max(0, safeHousehold - safeCurrent + safeNew)
-  const after = tariffEngine(afterTotalKwh).totalCost
+  const after = tariffEngine(afterTotalKwh, tariffConfig).totalCost
   return round2(Math.max(0, before - after))
 }
 

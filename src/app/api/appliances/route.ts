@@ -12,6 +12,7 @@ import {
 } from '@/lib/applianceCalculations'
 import { computeStatsBundle } from '@/lib/statService'
 import { computeApplianceAttribution } from '@/lib/applianceAttribution'
+import { getTariffConfigForUser } from '@/lib/userTariff'
 
 export async function GET(request: NextRequest) {
   try {
@@ -35,13 +36,14 @@ export async function GET(request: NextRequest) {
     }
 
     // Fetch user's appliances
-    const appliances = await prisma.appliance.findMany({
+	    const appliances = await prisma.appliance.findMany({
       where: whereConditions,
       orderBy: {
         createdAt: 'desc'
       }
-    })
-    const stats = await computeStatsBundle(session.user.id)
+	    })
+	    const stats = await computeStatsBundle(session.user.id)
+      const tariffConfig = await getTariffConfigForUser(session.user.id)
 
     // Transform appliances for response
     const appliancesData = appliances.map(appliance => ({
@@ -57,12 +59,13 @@ export async function GET(request: NextRequest) {
       createdAt: appliance.createdAt
     }))
 
-    const portfolio = allocateAppliancePortfolioCosts(
-      appliancesData.map(appliance => ({
-        id: appliance.id,
-        estimatedKwh: appliance.estimatedKwh || 0
-      }))
-    )
+	    const portfolio = allocateAppliancePortfolioCosts(
+	      appliancesData.map(appliance => ({
+	        id: appliance.id,
+	        estimatedKwh: appliance.estimatedKwh || 0
+	      })),
+        tariffConfig
+	    )
     const allocationById = new Map(
       portfolio.allocations.map(item => [item.id, item])
     )
@@ -212,12 +215,14 @@ export async function POST(request: NextRequest) {
       where: { userId: session.user.id },
       select: { id: true, estimatedKwh: true }
     })
-    const portfolio = allocateAppliancePortfolioCosts(
-      allAppliances.map(item => ({
-        id: item.id,
-        estimatedKwh: item.estimatedKwh || 0
-      }))
-    )
+	    const tariffConfig = await getTariffConfigForUser(session.user.id)
+	    const portfolio = allocateAppliancePortfolioCosts(
+	      allAppliances.map(item => ({
+	        id: item.id,
+	        estimatedKwh: item.estimatedKwh || 0
+	      })),
+        tariffConfig
+	    )
     const allocation = portfolio.allocations.find(item => item.id === updatedAppliance?.id)
     const stats = await computeStatsBundle(session.user.id)
     const attribution = computeApplianceAttribution(

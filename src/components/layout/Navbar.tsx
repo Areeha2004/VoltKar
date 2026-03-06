@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import React, { useEffect, useRef, useState } from 'react'
 import { signOut, useSession } from 'next-auth/react'
+import type { DemoMode } from '@/lib/demoMode'
 import {
   Bell,
   Menu,
@@ -30,7 +31,12 @@ const Navbar: React.FC = () => {
   const { data: session } = useSession()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [userMenuOpen, setUserMenuOpen] = useState(false)
+  const [demoMode, setDemoMode] = useState<DemoMode>(
+    process.env.NODE_ENV !== 'production' ? 'demo' : 'real'
+  )
+  const [isModeSaving, setIsModeSaving] = useState(false)
   const userMenuRef = useRef<HTMLDivElement>(null)
+  const demoModeEnabled = demoMode === 'demo'
 
   const name = session?.user?.name ?? session?.user?.email?.split('@')[0] ?? 'User'
   const initials = name
@@ -63,10 +69,68 @@ const Navbar: React.FC = () => {
     }
   }, [])
 
+  useEffect(() => {
+    let mounted = true
+
+    const fetchDemoModeStatus = async () => {
+      try {
+        const response = await fetch('/api/demo-mode', { cache: 'no-store' })
+        if (!response.ok) return
+        const payload = await response.json()
+        if (mounted) {
+          setDemoMode(payload?.mode === 'real' ? 'real' : 'demo')
+        }
+      } catch {
+        // Keep fallback based on NODE_ENV when status endpoint is unavailable.
+      }
+    }
+
+    void fetchDemoModeStatus()
+
+    return () => {
+      mounted = false
+    }
+  }, [])
+
   const isActive = (href: string) => pathname === href || pathname.startsWith(`${href}/`)
 
   const handleSignOut = () => {
     void signOut({ callbackUrl: '/login' })
+  }
+
+  const handleModeSwitch = async (nextMode: DemoMode) => {
+    if (isModeSaving || nextMode === demoMode) return
+
+    setIsModeSaving(true)
+    try {
+      const makeRequest = (method: 'PUT' | 'POST') =>
+        fetch('/api/demo-mode', {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: nextMode }),
+          credentials: 'same-origin',
+        })
+
+      let response = await makeRequest('PUT')
+      if (!response.ok && (response.status === 404 || response.status === 405 || response.status === 501)) {
+        response = await makeRequest('POST')
+      }
+
+      if (!response.ok) {
+        const details = await response.text().catch(() => 'Unknown error')
+        throw new Error(`Unable to switch mode (${response.status}): ${details}`)
+      }
+
+      const payload = await response.json()
+      setDemoMode(payload?.mode === 'real' ? 'real' : 'demo')
+
+      // Force data refresh so analytics and validations use the selected mode immediately.
+      window.location.reload()
+    } catch (error) {
+      console.error('Failed to switch mode:', error)
+    } finally {
+      setIsModeSaving(false)
+    }
   }
 
   return (
@@ -103,6 +167,46 @@ const Navbar: React.FC = () => {
         </div>
 
         <div className="hidden items-center gap-2 md:flex">
+          <div
+            className={`hidden items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] lg:flex ${
+              demoModeEnabled
+                ? 'border border-pink-400/35 bg-pink-400/10 text-pink-200'
+                : 'border border-emerald-400/35 bg-emerald-400/10 text-emerald-200'
+            }`}
+          >
+            <span
+              className={`h-2 w-2 rounded-full animate-pulse ${
+                demoModeEnabled ? 'bg-pink-300' : 'bg-emerald-300'
+              }`}
+            />
+            {demoModeEnabled ? 'Demo Mode ON' : 'Real Mode ON'}
+          </div>
+          <div className="hidden items-center gap-1 rounded-xl border border-white/10 bg-white/[0.02] p-1 lg:flex">
+            <button
+              type="button"
+              onClick={() => void handleModeSwitch('demo')}
+              disabled={isModeSaving}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.08em] transition-all ${
+                demoMode === 'demo'
+                  ? 'bg-pink-400/25 text-pink-100'
+                  : 'text-foreground-tertiary hover:text-foreground'
+              }`}
+            >
+              Demo
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleModeSwitch('real')}
+              disabled={isModeSaving}
+              className={`rounded-lg px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.08em] transition-all ${
+                demoMode === 'real'
+                  ? 'bg-emerald-400/20 text-emerald-100'
+                  : 'text-foreground-tertiary hover:text-foreground'
+              }`}
+            >
+              Real
+            </button>
+          </div>
           <button
             type="button"
             className="relative rounded-xl border border-white/10 bg-white/[0.02] p-2.5 text-foreground-secondary hover:border-cyan-400/40 hover:text-foreground"
@@ -164,6 +268,46 @@ const Navbar: React.FC = () => {
 
       {mobileMenuOpen && (
         <div className="border-t border-white/10 bg-background/95 px-4 py-4 backdrop-blur-2xl lg:hidden animate-slide-down">
+          <div
+            className={`mb-3 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] ${
+              demoModeEnabled
+                ? 'border border-amber-400/30 bg-amber-400/10 text-amber-200'
+                : 'border border-emerald-400/30 bg-emerald-400/10 text-emerald-200'
+            }`}
+          >
+            <span
+              className={`h-2 w-2 rounded-full animate-pulse ${
+                demoModeEnabled ? 'bg-amber-300' : 'bg-emerald-300'
+              }`}
+            />
+            {demoModeEnabled ? 'Demo Mode ON' : 'Real Mode ON'}
+          </div>
+          <div className="mb-4 flex items-center gap-1 rounded-xl border border-white/10 bg-white/[0.02] p-1">
+            <button
+              type="button"
+              onClick={() => void handleModeSwitch('demo')}
+              disabled={isModeSaving}
+              className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] transition-all ${
+                demoMode === 'demo'
+                  ? 'bg-amber-400/25 text-amber-100'
+                  : 'text-foreground-tertiary hover:text-foreground'
+              }`}
+            >
+              Demo
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleModeSwitch('real')}
+              disabled={isModeSaving}
+              className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold uppercase tracking-[0.08em] transition-all ${
+                demoMode === 'real'
+                  ? 'bg-emerald-400/20 text-emerald-100'
+                  : 'text-foreground-tertiary hover:text-foreground'
+              }`}
+            >
+              Real
+            </button>
+          </div>
           <div className="space-y-1">
             {navItems.map((item) => {
               const active = isActive(item.href)

@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Home, Edit, Trash2, Power, Calendar } from 'lucide-react'
+import { Calendar, Edit, Home, Power, Trash2 } from 'lucide-react'
 import Card from '../ui/Card'
 import Button from '../ui/Button'
 import Input from '../ui/Input'
@@ -54,15 +54,15 @@ const MeterCard: React.FC<MeterCardProps> = ({ meter, onUpdate, onDelete }) => {
   }
 
   return (
-    <Card className="hover:shadow-card-hover transition-all duration-300">
+    <Card className="h-full border border-white/10 bg-[#101a2b]/80 backdrop-blur-xl transition-all duration-300 hover:-translate-y-0.5 hover:border-cyan-400/25">
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <div className={`p-3 rounded-2xl ${
-              meter.status === 'active' 
-                ? 'bg-primary/20 text-primary' 
-                : 'bg-foreground-tertiary/20 text-foreground-tertiary'
-            }`}>
+            <div
+              className={`rounded-2xl p-3 ${
+                meter.status === 'active' ? 'bg-cyan-500/20 text-cyan-200' : 'bg-white/10 text-foreground-tertiary'
+              }`}
+            >
               <Home className="h-6 w-6" />
             </div>
             <div>
@@ -70,7 +70,7 @@ const MeterCard: React.FC<MeterCardProps> = ({ meter, onUpdate, onDelete }) => {
                 <Input
                   value={editData.label}
                   onChange={(e) => setEditData({ ...editData, label: e.target.value })}
-                  className="text-lg font-semibold"
+                  className="bg-white/[0.03] text-lg font-semibold"
                 />
               ) : (
                 <h3 className="text-lg font-semibold text-foreground">{meter.label}</h3>
@@ -80,7 +80,7 @@ const MeterCard: React.FC<MeterCardProps> = ({ meter, onUpdate, onDelete }) => {
                   <select
                     value={editData.type}
                     onChange={(e) => setEditData({ ...editData, type: e.target.value })}
-                    className="bg-background-card border border-border rounded px-2 py-1"
+                    className="rounded-lg border border-white/15 bg-white/[0.03] px-2 py-1 text-foreground"
                   >
                     <option value="single-phase">Single Phase</option>
                     <option value="three-phase">Three Phase</option>
@@ -88,7 +88,7 @@ const MeterCard: React.FC<MeterCardProps> = ({ meter, onUpdate, onDelete }) => {
                 ) : (
                   <span>{meter.type}</span>
                 )}
-                <span>•</span>
+                <span>-</span>
                 <div className="flex items-center space-x-1">
                   <Power className="h-3 w-3" />
                   <span className="capitalize">{meter.status}</span>
@@ -96,33 +96,20 @@ const MeterCard: React.FC<MeterCardProps> = ({ meter, onUpdate, onDelete }) => {
               </div>
             </div>
           </div>
-          
+
           <div className="flex items-center space-x-2">
             {isEditing ? (
               <>
-                <Button
-                  size="sm"
-                  onClick={handleSave}
-                  disabled={loading}
-                >
+                <Button size="sm" onClick={handleSave} disabled={loading}>
                   Save
                 </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setIsEditing(false)}
-                  disabled={loading}
-                >
+                <Button variant="ghost" size="sm" onClick={() => setIsEditing(false)} disabled={loading}>
                   Cancel
                 </Button>
               </>
             ) : (
               <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setIsEditing(true)}
-                >
+                <Button variant="ghost" size="sm" onClick={() => setIsEditing(true)}>
                   <Edit className="h-4 w-4" />
                 </Button>
                 <Button
@@ -130,7 +117,7 @@ const MeterCard: React.FC<MeterCardProps> = ({ meter, onUpdate, onDelete }) => {
                   size="sm"
                   onClick={handleDelete}
                   disabled={loading}
-                  className="text-red-500 hover:text-red-400"
+                  className="text-red-300 hover:text-red-200"
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
@@ -139,10 +126,10 @@ const MeterCard: React.FC<MeterCardProps> = ({ meter, onUpdate, onDelete }) => {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border/30">
+        <div className="grid grid-cols-2 gap-4 border-t border-white/10 pt-4">
           <div>
             <p className="text-sm text-foreground-secondary">Last Reading</p>
-            <p className="text-lg font-semibold text-foreground font-mono">
+            <p className="font-mono text-lg font-semibold text-foreground">
               {meter.lastReading ? meter.lastReading.toLocaleString() : 'No readings'}
             </p>
           </div>
@@ -151,10 +138,7 @@ const MeterCard: React.FC<MeterCardProps> = ({ meter, onUpdate, onDelete }) => {
             <div className="flex items-center space-x-1">
               <Calendar className="h-4 w-4 text-foreground-tertiary" />
               <p className="text-sm text-foreground">
-                {meter.lastReadingDate 
-                  ? new Date(meter.lastReadingDate).toLocaleDateString()
-                  : 'Never'
-                }
+                {meter.lastReadingDate ? new Date(meter.lastReadingDate).toLocaleDateString() : 'Never'}
               </p>
             </div>
           </div>

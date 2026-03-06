@@ -1,6 +1,9 @@
-import { tariffEngine } from './tariffEngine'
+import { tariffEngine, type TariffConfig } from './tariffEngine'
 import { getMonthlyBudgetPkr } from './budgetStore'
 import prisma from './prisma'
+import { getTariffConfigForUser } from './userTariff'
+import { isDemoTimeTravelEnabled } from './demoMode'
+import { getDemoModeFromServerCookies } from './demoModeServer'
 
 const TIMEZONE = 'Asia/Karachi'
 
@@ -88,9 +91,27 @@ function toDateKey(date: Date): string {
   return `${y}-${m}-${d}`
 }
 
-function getCurrentTimeWindow(): TimeWindow {
+async function resolveAnchorDate(userId: string, meterId?: string): Promise<Date> {
   const now = new Date()
-  const local = new Date(now.toLocaleString('en-US', { timeZone: TIMEZONE }))
+  const demoMode = await getDemoModeFromServerCookies()
+  if (!isDemoTimeTravelEnabled(demoMode)) return now
+
+  const latestReading = await prisma.meterReading.findFirst({
+    where: {
+      userId,
+      ...(meterId ? { meterId } : {})
+    },
+    orderBy: [{ date: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
+    select: { date: true }
+  })
+
+  if (!latestReading?.date) return now
+  return latestReading.date > now ? latestReading.date : now
+}
+
+async function getCurrentTimeWindow(userId: string, meterId?: string): Promise<TimeWindow> {
+  const anchorDate = await resolveAnchorDate(userId, meterId)
+  const local = new Date(anchorDate.toLocaleString('en-US', { timeZone: TIMEZONE }))
   const monthStart = new Date(local.getFullYear(), local.getMonth(), 1)
   const daysInMonth = new Date(local.getFullYear(), local.getMonth() + 1, 0).getDate()
 
@@ -198,7 +219,8 @@ async function computeMeterUsageInRange(
 async function aggregateUsageAndCostByMeters(
   meterIds: string[],
   start: Date,
-  end: Date
+  end: Date,
+  tariffConfig: TariffConfig
 ): Promise<UsageCostStats> {
   if (meterIds.length === 0) {
     return { usage_kwh: 0, cost_pkr: 0, meter_count: 0 }
@@ -214,7 +236,7 @@ async function aggregateUsageAndCostByMeters(
 
     meterCount += 1
     totalUsage += meterStats.usage
-    totalCost += tariffEngine(meterStats.usage).totalCost
+    totalCost += tariffEngine(meterStats.usage, tariffConfig).totalCost
   }
 
   return {
@@ -224,29 +246,38 @@ async function aggregateUsageAndCostByMeters(
   }
 }
 
-async function getPreviousMonthStats(userId: string, meterId?: string, window?: TimeWindow) {
-  const safeWindow = window || getCurrentTimeWindow()
+async function getPreviousMonthStats(
+  userId: string,
+  meterId: string | undefined,
+  window: TimeWindow,
+  tariffConfig: TariffConfig
+) {
   const meterIds = await resolveMeterIds(userId, meterId)
-  const { start, end } = getPreviousMonthWindow(safeWindow)
+  const { start, end } = getPreviousMonthWindow(window)
 
-  return aggregateUsageAndCostByMeters(meterIds, start, end)
+  return aggregateUsageAndCostByMeters(meterIds, start, end, tariffConfig)
 }
 
-async function getPreviousSamePeriodStats(userId: string, meterId?: string, window?: TimeWindow) {
-  const safeWindow = window || getCurrentTimeWindow()
+async function getPreviousSamePeriodStats(
+  userId: string,
+  meterId: string | undefined,
+  window: TimeWindow,
+  tariffConfig: TariffConfig
+) {
   const meterIds = await resolveMeterIds(userId, meterId)
-  const { prevYear, prevMonth, start } = getPreviousMonthWindow(safeWindow)
+  const { prevYear, prevMonth, start } = getPreviousMonthWindow(window)
   const prevMonthDays = new Date(prevYear, prevMonth + 1, 0).getDate()
-  const samePeriodEndDay = Math.min(safeWindow.daysElapsed, prevMonthDays)
+  const samePeriodEndDay = Math.min(window.daysElapsed, prevMonthDays)
   const end = new Date(prevYear, prevMonth, samePeriodEndDay, 23, 59, 59, 999)
 
-  return aggregateUsageAndCostByMeters(meterIds, start, end)
+  return aggregateUsageAndCostByMeters(meterIds, start, end, tariffConfig)
 }
 
 async function getCurrentMonthStats(
   userId: string,
   meterId?: string,
-  window?: TimeWindow
+  window?: TimeWindow,
+  tariffConfig?: TariffConfig
 ): Promise<{
   mtdUsage: number
   mtdCost: number
@@ -255,7 +286,8 @@ async function getCurrentMonthStats(
   method: 'actual' | 'proportional' | 'early_estimate'
   metersWithData: number
 }> {
-  const safeWindow = window || getCurrentTimeWindow()
+  const safeWindow = window || (await getCurrentTimeWindow(userId, meterId))
+  const safeTariffConfig = tariffConfig || (await getTariffConfigForUser(userId))
   const meterIds = await resolveMeterIds(userId, meterId)
   if (meterIds.length === 0) {
     return {
@@ -289,7 +321,7 @@ async function getCurrentMonthStats(
     metersWithData += 1
     mtdUsage += currentStats.usage
 
-    const meterMtdCost = tariffEngine(currentStats.usage).totalCost
+    const meterMtdCost = tariffEngine(currentStats.usage, safeTariffConfig).totalCost
     mtdCost += meterMtdCost
 
     const latestReadingDay = currentStats.latestReadingDate
@@ -318,7 +350,7 @@ async function getCurrentMonthStats(
     forecastCost +=
       safeWindow.daysElapsed >= safeWindow.daysInMonth && meterHasMonthCompleteReading
         ? meterMtdCost
-        : tariffEngine(cappedForecastUsage).totalCost
+        : tariffEngine(cappedForecastUsage, safeTariffConfig).totalCost
   }
 
   const method: 'actual' | 'proportional' | 'early_estimate' =
@@ -346,11 +378,12 @@ async function getCurrentMonthStats(
 
 export async function computeStatsBundle(userId: string, meterId?: string): Promise<StatsBundle> {
   const calcId = `calc_${Date.now()}`
-  const window = getCurrentTimeWindow()
+  const window = await getCurrentTimeWindow(userId, meterId)
+  const tariffConfig = await getTariffConfigForUser(userId)
 
-  const prev = await getPreviousMonthStats(userId, meterId, window)
-  const prevSamePeriod = await getPreviousSamePeriodStats(userId, meterId, window)
-  const cur = await getCurrentMonthStats(userId, meterId, window)
+  const prev = await getPreviousMonthStats(userId, meterId, window, tariffConfig)
+  const prevSamePeriod = await getPreviousSamePeriodStats(userId, meterId, window, tariffConfig)
+  const cur = await getCurrentMonthStats(userId, meterId, window, tariffConfig)
   const budget = await getMonthlyBudgetPkr(userId)
 
   const mtdEfficiency = round2(efficiency(cur.mtdUsage, prev.usage_kwh))
@@ -442,7 +475,8 @@ export async function getAnalyticsTimeSeries(userId: string, meterId?: string): 
   weeklyBreakdown: Array<{ week: number; usage: number; cost: number }>
   budgetProgress: Array<{ day: number; spent: number; budget: number }>
 }> {
-  const window = getCurrentTimeWindow()
+  const window = await getCurrentTimeWindow(userId, meterId)
+  const tariffConfig = await getTariffConfigForUser(userId)
   const meterIds = await resolveMeterIds(userId, meterId)
   if (meterIds.length === 0) {
     return {
@@ -503,7 +537,8 @@ export async function getAnalyticsTimeSeries(userId: string, meterId?: string): 
     }
 
     const meterTotalUsage = Array.from(meterDailyUsage.values()).reduce((sum, usage) => sum + usage, 0)
-    const meterTotalCost = meterTotalUsage > 0 ? tariffEngine(meterTotalUsage).totalCost : 0
+    const meterTotalCost =
+      meterTotalUsage > 0 ? tariffEngine(meterTotalUsage, tariffConfig).totalCost : 0
 
     for (const [dateKey, usage] of meterDailyUsage.entries()) {
       const allocatedCost = meterTotalUsage > 0 ? meterTotalCost * (usage / meterTotalUsage) : 0

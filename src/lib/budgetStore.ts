@@ -1,7 +1,8 @@
 import prisma from './prisma'
+import { DEFAULT_OPERATOR } from './discoTariffs'
 
 const DEFAULT_PREFERENCE_CREATE = {
-  disco: 'LESCO',
+  disco: DEFAULT_OPERATOR,
   language: 'en',
   unitType: 'kWh',
   currency: 'PKR'

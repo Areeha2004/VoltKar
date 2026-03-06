@@ -1,6 +1,6 @@
 'use client'
-import React, { useState } from 'react'
-import { Home, Plus, Zap, TrendingUp, Activity } from 'lucide-react'
+import React, { useMemo, useState } from 'react'
+import { Activity, AlertTriangle, Home, Plus, TrendingUp, WalletCards, Zap } from 'lucide-react'
 import Navbar from '../../components/layout/Navbar'
 import Sidebar from '../../components/layout/Sidebar'
 import Card from '../../components/ui/Card'
@@ -25,22 +25,57 @@ const MetersPage: React.FC = () => {
     await deleteMeter(id)
   }
 
+  const stats = useMemo(() => {
+    const activeCount = meters.filter(m => m.status === 'active').length
+    const withReadings = meters.filter(m => typeof m.lastReading === 'number' && m.lastReading > 0)
+    const avgLastReading =
+      withReadings.length > 0
+        ? Math.round(withReadings.reduce((sum, meter) => sum + (meter.lastReading || 0), 0) / withReadings.length)
+        : 0
+
+    return [
+      {
+        title: 'Total Meters',
+        value: meters.length.toString(),
+        helper: 'Registered connections',
+        icon: WalletCards,
+        tone: 'from-cyan-500/25 to-blue-500/5 text-cyan-300'
+      },
+      {
+        title: 'Active Meters',
+        value: activeCount.toString(),
+        helper: 'Currently monitoring',
+        icon: Zap,
+        tone: 'from-emerald-500/25 to-primary/5 text-emerald-300'
+      },
+      {
+        title: 'Meters with Readings',
+        value: withReadings.length.toString(),
+        helper: 'Data-ready meters',
+        icon: TrendingUp,
+        tone: 'from-amber-500/25 to-amber-500/5 text-amber-200'
+      },
+      {
+        title: 'Average Last Reading',
+        value: avgLastReading > 0 ? avgLastReading.toLocaleString() : '--',
+        unit: avgLastReading > 0 ? 'units' : '',
+        helper: 'Snapshot across active history',
+        icon: Activity,
+        tone: 'from-primary/25 to-cyan-500/5 text-primary-200'
+      }
+    ]
+  }, [meters])
+
   if (loading) {
     return (
-      <div className="min-h-screen bg-background">
+      <div className="min-h-screen bg-background text-foreground">
         <Navbar />
         <div className="flex">
           <Sidebar />
-          <main className="flex-1 p-8">
-            <div className="max-w-7xl mx-auto">
-              <div className="animate-pulse space-y-8">
-                <div className="h-8 bg-background-card rounded w-1/3"></div>
-                <div className="grid md:grid-cols-3 gap-6">
-                  {[1, 2, 3].map(i => (
-                    <div key={i} className="h-48 bg-background-card rounded-2xl"></div>
-                  ))}
-                </div>
-              </div>
+          <main className="flex flex-1 items-center justify-center px-6">
+            <div className="flex flex-col items-center gap-4">
+              <div className="h-12 w-12 animate-spin rounded-full border-2 border-cyan-300/30 border-t-cyan-300" />
+              <p className="text-sm text-foreground-secondary">Loading meter workspace...</p>
             </div>
           </main>
         </div>
@@ -49,114 +84,100 @@ const MetersPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Background Effects */}
-      <div className="fixed inset-0 mesh-gradient pointer-events-none opacity-20" />
-      
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="pointer-events-none fixed inset-0 overflow-hidden">
+        <div className="absolute -left-24 top-0 h-72 w-72 rounded-full bg-cyan-500/20 blur-[120px] animate-float" />
+        <div className="absolute right-0 top-1/3 h-80 w-80 rounded-full bg-primary/15 blur-[130px] animate-float" />
+        <div className="absolute inset-0 opacity-[0.08] [background-image:linear-gradient(rgba(255,255,255,0.45)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.45)_1px,transparent_1px)] [background-size:72px_72px]" />
+      </div>
+
       <Navbar />
-      
-      <div className="flex">
+
+      <div className="relative flex">
         <Sidebar />
-        
-        <main className="flex-1 p-8">
-          <div className="max-w-7xl mx-auto space-y-8">
-            {/* Header */}
-            <div className="flex items-center justify-between animate-fade-in">
-              <div className="space-y-3">
-                <div className="flex items-center space-x-3">
-                  <div className="bg-gradient-to-r from-primary to-accent-cyan p-3 rounded-2xl">
-                    <Home className="h-8 w-8 text-white" />
-                  </div>
-                  <div>
-                    <h1 className="text-4xl font-bold text-foreground font-sora">Meter Management</h1>
-                    <p className="text-xl text-foreground-secondary">Manage your electricity meters and connections</p>
+
+        <main className="flex-1 px-4 pb-10 pt-6 md:px-8">
+          <div className="mx-auto max-w-6xl space-y-6">
+            <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-gradient-to-br from-[#0a1323]/95 via-[#0f1a2d]/95 to-[#081220]/95 p-6 shadow-premium md:p-8 animate-fade-in">
+              <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-cyan-400/20 blur-[120px]" />
+
+              <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+                <div className="space-y-3">
+                  <p className="text-xs uppercase tracking-[0.22em] text-foreground-tertiary">System</p>
+                  <h1 className="font-sora text-3xl font-bold leading-tight text-foreground md:text-4xl">
+                    Meter Management
+                  </h1>
+                  <p className="max-w-2xl text-sm text-foreground-secondary md:text-base">
+                    Keep all connections organized, maintain reading continuity, and ensure stable analytics for your
+                    full energy workspace.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-foreground-secondary">
+                      {meters.length} meters configured
+                    </span>
+                    <span className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs text-foreground-secondary">
+                      {stats[1].value} active
+                    </span>
                   </div>
                 </div>
-              </div>
-              <Button 
-                className="premium-button"
-                onClick={() => setShowCreateModal(true)}
-              >
-                <Plus className="h-5 w-5 mr-2" />
-                Add Meter
-              </Button>
-            </div>
 
-            {/* Stats */}
-            <div className="grid md:grid-cols-4 gap-6">
-              {[
-                {
-                  title: 'Total Meters',
-                  value: meters.length.toString(),
-                  icon: Home,
-                  gradient: 'from-primary to-accent-cyan',
-                  description: 'Connected meters'
-                },
-                {
-                  title: 'Active Meters',
-                  value: meters.filter(m => m.status === 'active').length.toString(),
-                  icon: Zap,
-                  gradient: 'from-accent-blue to-accent-purple',
-                  description: 'Currently monitoring'
-                },
-                {
-                  title: 'Total Readings',
-                  value: '0', // Will be calculated from readings
-                  icon: TrendingUp,
-                  gradient: 'from-accent-amber to-accent-pink',
-                  description: 'Recorded this month'
-                },
-                {
-                  title: 'Avg. Usage',
-                  value: '0',
-                  unit: 'kWh',
-                  icon: Activity,
-                  gradient: 'from-accent-emerald to-primary',
-                  description: 'Per meter/month'
-                }
-              ].map((stat, index) => (
-                <Card key={index} className="card-premium animate-fade-in" ><div style={{ animationDelay: `${index * 0.1}s` }}>
- <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="relative">
-                        <div className={`absolute inset-0 bg-gradient-to-r ${stat.gradient} rounded-2xl blur-xl opacity-20`} />
-                        <div className={`relative bg-gradient-to-r ${stat.gradient} p-3 rounded-2xl`}>
-                          <stat.icon className="h-6 w-6 text-white" />
-                        </div>
-                      </div>
+                <Button onClick={() => setShowCreateModal(true)}>
+                  <Plus className="h-4 w-4" />
+                  Add Meter
+                </Button>
+              </div>
+            </section>
+
+            <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              {stats.map(stat => (
+                <Card key={stat.title} className="h-full border border-white/10 bg-[#0f1727]/75 backdrop-blur-xl">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="space-y-2">
+                      <p className="text-xs uppercase tracking-[0.18em] text-foreground-tertiary">{stat.title}</p>
+                      <p className="font-sora text-2xl font-semibold text-foreground">
+                        {stat.value}
+                        {stat.unit && <span className="ml-1 text-sm font-normal text-foreground-secondary">{stat.unit}</span>}
+                      </p>
+                      <p className="text-xs text-foreground-secondary">{stat.helper}</p>
                     </div>
-                    <div className="space-y-1">
-                      <p className="text-foreground-secondary text-sm font-medium">{stat.title}</p>
-                      <div className="flex items-baseline space-x-2">
-                        <span className="text-3xl font-bold text-foreground font-mono">{stat.value}</span>
-                        {stat.unit && <span className="text-foreground-tertiary text-sm">{stat.unit}</span>}
-                      </div>
-                      <p className="text-xs text-foreground-muted">{stat.description}</p>
-                    </div>
+                    <span
+                      className={`flex h-11 w-11 items-center justify-center rounded-xl border border-white/10 bg-gradient-to-br ${stat.tone}`}
+                    >
+                      <stat.icon className="h-5 w-5" />
+                    </span>
                   </div>
-                    </div>
-                 
                 </Card>
               ))}
-            </div>
+            </section>
 
-            {/* Error State */}
             {error && (
-              <Card className="border-red-500/20 bg-red-500/5">
-                <div className="text-center py-8">
-                  <p className="text-red-400 mb-4">{error}</p>
+              <section className="rounded-3xl border border-red-500/25 bg-red-500/10 p-5 md:p-6">
+                <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-xl border border-red-400/30 bg-red-500/15 p-2.5">
+                      <AlertTriangle className="h-5 w-5 text-red-200" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-red-100">Unable to fetch meters</p>
+                      <p className="text-sm text-red-100/90">{error}</p>
+                    </div>
+                  </div>
                   <Button variant="outline" onClick={() => window.location.reload()}>
                     Retry
                   </Button>
                 </div>
-              </Card>
+              </section>
             )}
 
-            {/* Meters Grid */}
             {meters.length > 0 ? (
-              <div className="space-y-6">
-                <h2 className="text-2xl font-semibold text-foreground font-sora">Your Meters</h2>
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <section className="rounded-3xl border border-white/10 bg-[#0f1727]/75 p-6 backdrop-blur-xl md:p-7">
+                <div className="mb-4 flex items-center justify-between">
+                  <h2 className="font-sora text-xl font-semibold text-foreground">Your Meters</h2>
+                  <span className="rounded-full border border-white/15 px-2.5 py-1 text-xs text-foreground-secondary">
+                    {meters.length} entries
+                  </span>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                   {meters.map((meter, index) => (
                     <div key={meter.id} className="animate-fade-in" style={{ animationDelay: `${index * 0.1}s` }}>
                       <MeterCard
@@ -167,34 +188,30 @@ const MetersPage: React.FC = () => {
                     </div>
                   ))}
                 </div>
-              </div>
+              </section>
             ) : (
-              <Card className="text-center py-16">
-                <div className="space-y-6">
-                  <div className="bg-gradient-to-r from-primary/20 to-accent-cyan/20 p-6 rounded-3xl w-fit mx-auto">
-                    <Home className="h-16 w-16 text-primary mx-auto" />
+              <section className="rounded-3xl border border-white/10 bg-[#0f1727]/75 p-8 text-center backdrop-blur-xl md:p-12">
+                <div className="mx-auto max-w-lg space-y-5">
+                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl border border-white/10 bg-white/[0.03]">
+                    <Home className="h-8 w-8 text-cyan-200" />
                   </div>
-                  <div className="space-y-2">
-                    <h3 className="text-2xl font-semibold text-foreground">No Meters Added</h3>
-                    <p className="text-foreground-secondary max-w-md mx-auto">
-                      Get started by adding your first electricity meter to begin tracking your usage and costs.
+                  <div>
+                    <h3 className="font-sora text-2xl font-semibold text-foreground">No meters added yet</h3>
+                    <p className="mt-2 text-sm text-foreground-secondary md:text-base">
+                      Add your first meter to unlock reading capture, slab analysis, and optimization workflows.
                     </p>
                   </div>
-                  <Button 
-                    className="premium-button"
-                    onClick={() => setShowCreateModal(true)}
-                  >
-                    <Plus className="h-5 w-5 mr-2" />
+                  <Button onClick={() => setShowCreateModal(true)}>
+                    <Plus className="h-4 w-4" />
                     Add Your First Meter
                   </Button>
                 </div>
-              </Card>
+              </section>
             )}
           </div>
         </main>
       </div>
 
-      {/* Create Meter Modal */}
       <CreateMeterModal
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}

@@ -8,13 +8,15 @@ import Input from '../../components/ui/Input';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { Zap } from 'lucide-react';
+import { DISCO_OPTIONS } from '@/lib/discoTariffs';
 const SignupPage: React.FC = () => {
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     password: '',
     confirmPassword: '',
-    image: ''
+    image: '',
+    disco: 'LESCO'
   });
 
   const [showPassword, setShowPassword] = useState(false);
@@ -70,6 +72,9 @@ const SignupPage: React.FC = () => {
     if (!acceptTerms) {
       newErrors.terms = 'Please accept the terms and conditions';
     }
+    if (!formData.disco) {
+      newErrors.disco = 'Please select your electricity operator';
+    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -85,12 +90,13 @@ const SignupPage: React.FC = () => {
       const res = await fetch('/api/auth/signup', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    name: formData.name,
-    email: formData.email,
-    password: formData.password,
-    image: formData.image
-  })
+	  body: JSON.stringify({
+	    name: formData.name,
+	    email: formData.email,
+	    password: formData.password,
+	    image: formData.image,
+      disco: formData.disco
+	  })
 });
 
 
@@ -183,6 +189,27 @@ const SignupPage: React.FC = () => {
     </button>
   </div>
 
+  {/* Electricity Operator */}
+  <div className="space-y-2">
+    <label className="text-sm font-medium text-foreground-secondary">
+      Electricity Operator (DISCO)
+    </label>
+    <select
+      name="disco"
+      value={formData.disco}
+      onChange={(e) => setFormData({ ...formData, disco: e.target.value })}
+      className="input-field w-full"
+      required
+    >
+      {DISCO_OPTIONS.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label} - {option.approxRange}
+        </option>
+      ))}
+    </select>
+    {errors.disco && <p className="text-sm text-red-500">{errors.disco}</p>}
+  </div>
+
   {/* Confirm Password */}
   <div className="relative">
     <Input
@@ -253,5 +280,4 @@ const SignupPage: React.FC = () => {
 }
 
 export default SignupPage
-
 

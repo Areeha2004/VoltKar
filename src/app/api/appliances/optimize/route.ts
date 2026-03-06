@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/authOptions'
 import prisma from '@/lib/prisma'
-import { 
+import {
   calculateEstimatedKwh, 
   allocateAppliancePortfolioCosts,
   estimateHouseholdSavingsFromApplianceDelta,
@@ -10,6 +10,7 @@ import {
   getEfficiencyRating
 } from '@/lib/applianceCalculations'
 import { tariffEngine } from '@/lib/tariffEngine'
+import { getTariffConfigForUser } from '@/lib/userTariff'
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,8 +20,9 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { searchParams } = new URL(request.url)
-    const applianceId = searchParams.get('applianceId')
+	    const { searchParams } = new URL(request.url)
+	    const applianceId = searchParams.get('applianceId')
+      const tariffConfig = await getTariffConfigForUser(session.user.id)
 
     const allUserAppliances = await prisma.appliance.findMany({
       where: { userId: session.user.id }
@@ -46,12 +48,13 @@ export async function GET(request: NextRequest) {
       (sum, appliance) => sum + (appliance.estimatedKwh || 0),
       0
     )
-    const portfolio = allocateAppliancePortfolioCosts(
-      allUserAppliances.map(appliance => ({
-        id: appliance.id,
-        estimatedKwh: appliance.estimatedKwh || 0
-      }))
-    )
+	    const portfolio = allocateAppliancePortfolioCosts(
+	      allUserAppliances.map(appliance => ({
+	        id: appliance.id,
+	        estimatedKwh: appliance.estimatedKwh || 0
+	      })),
+        tariffConfig
+	    )
     const allocationById = new Map(
       portfolio.allocations.map(item => [item.id, item])
     )
@@ -92,11 +95,12 @@ export async function GET(request: NextRequest) {
         appliance.daysPerMonth,
         appliance.type
       )
-      scenarios.reduceHours.savings = estimateHouseholdSavingsFromApplianceDelta(
-        totalHouseholdKwh,
-        currentKwh,
-        reducedKwh
-      )
+	      scenarios.reduceHours.savings = estimateHouseholdSavingsFromApplianceDelta(
+	        totalHouseholdKwh,
+	        currentKwh,
+	        reducedKwh,
+          tariffConfig
+	      )
 
       // Calculate inverter upgrade savings
       if (scenarios.upgradeToInverter.applicable) {
@@ -106,17 +110,19 @@ export async function GET(request: NextRequest) {
           appliance.daysPerMonth,
           'Inverter'
         )
-        scenarios.upgradeToInverter.savings = estimateHouseholdSavingsFromApplianceDelta(
-          totalHouseholdKwh,
-          currentKwh,
-          inverterKwh
-        )
-      }
-      scenarios.optimizeSchedule.savings = estimateHouseholdSavingsFromApplianceDelta(
-        totalHouseholdKwh,
-        currentKwh,
-        currentKwh * 0.9
-      )
+	        scenarios.upgradeToInverter.savings = estimateHouseholdSavingsFromApplianceDelta(
+	          totalHouseholdKwh,
+	          currentKwh,
+	          inverterKwh,
+            tariffConfig
+	        )
+	      }
+	      scenarios.optimizeSchedule.savings = estimateHouseholdSavingsFromApplianceDelta(
+	        totalHouseholdKwh,
+	        currentKwh,
+	        currentKwh * 0.9,
+          tariffConfig
+	      )
       
       const suggestions = generateOptimizationSuggestions({ ...appliance, estimatedKwh: appliance.estimatedKwh ?? undefined, contribution: appliance.contribution || 0 })
       const totalPotentialSavings = Object.values(scenarios)
@@ -181,7 +187,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { applianceId, optimizationType } = await request.json()
+	    const { applianceId, optimizationType } = await request.json()
+      const tariffConfig = await getTariffConfigForUser(session.user.id)
 
     if (!applianceId || !optimizationType) {
       return NextResponse.json(
@@ -243,7 +250,7 @@ export async function POST(request: NextRequest) {
       _sum: { estimatedKwh: true }
     })
     const oldTotalKwh = beforeTotalKwhAgg._sum.estimatedKwh || 0
-    const oldTotalCost = tariffEngine(oldTotalKwh).totalCost
+	    const oldTotalCost = tariffEngine(oldTotalKwh, tariffConfig).totalCost
 
     // Update the appliance
     const updatedAppliance = await prisma.appliance.update({
@@ -258,16 +265,17 @@ export async function POST(request: NextRequest) {
       where: { userId: session.user.id },
       select: { id: true, estimatedKwh: true }
     })
-    const afterPortfolio = allocateAppliancePortfolioCosts(
-      afterAppliances.map(item => ({
-        id: item.id,
-        estimatedKwh: item.estimatedKwh || 0
-      }))
-    )
+	    const afterPortfolio = allocateAppliancePortfolioCosts(
+	      afterAppliances.map(item => ({
+	        id: item.id,
+	        estimatedKwh: item.estimatedKwh || 0
+	      })),
+        tariffConfig
+	    )
     const updatedAllocation = afterPortfolio.allocations.find(item => item.id === updatedAppliance.id)
 
     const newTotalKwh = afterPortfolio.totalKwh
-    const newTotalCost = tariffEngine(newTotalKwh).totalCost
+	    const newTotalCost = tariffEngine(newTotalKwh, tariffConfig).totalCost
     const savings = Math.max(0, oldTotalCost - newTotalCost)
 
     return NextResponse.json({

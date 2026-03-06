@@ -81,6 +81,131 @@ function safeEffort(value: string): Effort {
   return 'medium'
 }
 
+function budgetGapFromSummary(summary: any): number {
+  const budget = Number(summary?.budget_pkr) || 0
+  const projected = Number(summary?.projected_cost_pkr) || 0
+  if (budget <= 0) return 0
+  return round2(Math.max(0, projected - budget))
+}
+
+function buildBudgetImpactNote(estimatedSavingsPkr: number, budgetGap: number): string {
+  if (estimatedSavingsPkr <= 0) return 'Impact is low; treat this as a support action.'
+  if (budgetGap > 0) {
+    const coverage = Math.min(100, round2((estimatedSavingsPkr / budgetGap) * 100))
+    return `This can recover around ${coverage}% of your current budget gap.`
+  }
+  return `This can reduce your projected bill by about Rs ${round2(estimatedSavingsPkr).toLocaleString()} this month.`
+}
+
+function defaultSteps(target: AiRecommendation['target']): string[] {
+  if (target === 'meter') {
+    return [
+      'Move one high-load task to the lower-rate meter.',
+      'Keep this change for 3 days.',
+      'Check the next reading and keep only if cost drops.'
+    ]
+  }
+
+  if (target === 'device') {
+    return [
+      'Reduce runtime by 30-60 minutes for the target device.',
+      'Run the device in off-peak hours where possible.',
+      'Track bill impact in the next weekly review.'
+    ]
+  }
+
+  if (target === 'budget') {
+    return [
+      'Apply the top two easy actions first.',
+      'Recalculate projected bill after your next reading.',
+      'Keep the plan only if the budget gap is shrinking.'
+    ]
+  }
+
+  return [
+    'Apply this action for 3-7 days.',
+    'Track cost trend after each reading.',
+    'Keep only actions that show measurable savings.'
+  ]
+}
+
+function sanitizeSteps(steps: string[] | undefined, target: AiRecommendation['target']): string[] {
+  const cleaned = Array.isArray(steps)
+    ? steps
+        .map(step => String(step).trim())
+        .filter(Boolean)
+        .filter((step, index, arr) => arr.findIndex(item => item.toLowerCase() === step.toLowerCase()) === index)
+    : []
+
+  if (cleaned.length === 0) return defaultSteps(target)
+  return cleaned.slice(0, 3)
+}
+
+function recommendationScore(rec: AiRecommendation, budgetMode: BudgetMode): number {
+  const effortScore = rec.effort === 'easy' ? 45 : rec.effort === 'medium' ? 20 : 0
+  const timeframeScore = rec.timeframe === 'today' ? 20 : rec.timeframe === 'this_week' ? 12 : 4
+  const priorityScore = rec.priority === 'high' ? 16 : rec.priority === 'medium' ? 9 : 3
+  const savingsScore = Math.min(35, rec.estimatedSavingsPkr / 120)
+  const budgetBonus =
+    budgetMode === 'recovery' && (rec.target === 'budget' || rec.target === 'meter') ? 8 : 0
+  return effortScore + timeframeScore + priorityScore + savingsScore + budgetBonus
+}
+
+function normalizeRecommendation(
+  rec: AiRecommendation,
+  index: number,
+  budgetGap: number
+): AiRecommendation {
+  const target = rec.target
+  const estimatedSavingsPkr = round2(Math.max(0, Number(rec.estimatedSavingsPkr) || 0))
+  const reasonBase = String(rec.reason || 'Practical action to reduce electricity cost.').trim()
+  const reason = `${reasonBase} ${buildBudgetImpactNote(estimatedSavingsPkr, budgetGap)}`.trim()
+
+  let effort = rec.effort
+  if (effort === 'hard' && estimatedSavingsPkr < 1500) {
+    effort = 'medium'
+  }
+
+  return {
+    id: String(rec.id || `rec-${index + 1}`),
+    title: String(rec.title || `Action ${index + 1}`).trim(),
+    reason,
+    target,
+    priority: safePriority(String(rec.priority || 'medium')),
+    effort: safeEffort(String(effort || 'medium')),
+    timeframe:
+      rec.timeframe === 'today' || rec.timeframe === 'this_week' || rec.timeframe === 'this_month'
+        ? rec.timeframe
+        : 'this_week',
+    estimatedSavingsPkr,
+    steps: sanitizeSteps(rec.steps, target)
+  }
+}
+
+function prioritizeRecommendations(
+  primary: AiRecommendation[],
+  budgetMode: BudgetMode,
+  budgetGap: number,
+  fallback: AiRecommendation[] = []
+): AiRecommendation[] {
+  const merged = [...primary, ...fallback]
+    .map((rec, idx) => normalizeRecommendation(rec, idx, budgetGap))
+    .filter(rec => rec.estimatedSavingsPkr > 0)
+
+  const deduped: AiRecommendation[] = []
+  const seen = new Set<string>()
+
+  for (const rec of merged) {
+    const key = rec.title.trim().toLowerCase()
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    deduped.push(rec)
+  }
+
+  deduped.sort((a, b) => recommendationScore(b, budgetMode) - recommendationScore(a, budgetMode))
+  return deduped.slice(0, 6)
+}
+
 function buildFallbackPlan(context: AiAdvisorContext): AiOptimizationPlan {
   const optimization = context.optimization || {}
   const summary = optimization.summary || {}
@@ -96,8 +221,9 @@ function buildFallbackPlan(context: AiAdvisorContext): AiOptimizationPlan {
         ? 'watch'
         : 'safe'
   const meterMode: MeterMode = meterCount >= 2 ? 'dual_meter' : 'single_meter'
+  const budgetGap = budgetGapFromSummary(summary)
 
-  const recommendations: AiRecommendation[] = opportunities.slice(0, 5).map((item: any, idx: number) => ({
+  const rawRecommendations: AiRecommendation[] = opportunities.slice(0, 8).map((item: any, idx: number) => ({
     id: String(item.id || `rec-${idx + 1}`),
     title: String(item.title || 'Optimization Action'),
     reason: String(item.description || 'Action derived from projected usage and tariff behavior.'),
@@ -110,16 +236,12 @@ function buildFallbackPlan(context: AiAdvisorContext): AiOptimizationPlan {
             ? 'budget'
             : 'behavior',
     priority: safePriority(String(item.priority || 'medium')),
-    effort:
-      item.type === 'load_balancing'
-        ? 'medium'
-        : item.type === 'budget'
-          ? 'hard'
-          : 'easy',
+    effort: item.type === 'load_balancing' ? 'medium' : item.type === 'budget' ? 'medium' : 'easy',
     timeframe: item.priority === 'high' ? 'today' : 'this_week',
     estimatedSavingsPkr: round2(Number(item.potential_savings) || 0),
     steps: Array.isArray(item.actions) ? item.actions.slice(0, 4).map(String) : []
   }))
+  const recommendations = prioritizeRecommendations(rawRecommendations, budgetMode, budgetGap)
 
   const warnings: AiWarning[] = []
   if (summary.budget_status === 'over_budget' && summary.budget_pkr) {
@@ -354,7 +476,7 @@ export async function generateAiOptimizationPlan(context: AiAdvisorContext): Pro
           {
             role: 'user',
             content:
-              `Build optimization plan using this context JSON:\n${JSON.stringify(promptContext)}\nConstraints: do not assume devices are physically split per meter; load balancing means planned unit distribution across meter slabs. Keep steps concise and actionable.`
+              `Build optimization plan using this context JSON:\n${JSON.stringify(promptContext)}\nConstraints: prioritize no-cost or low-effort actions first, each recommendation must include clear monthly savings in PKR, avoid technical wording, do not assume devices are physically split per meter, load balancing means planned unit distribution across meter slabs, and keep steps concise/actionable.`
           }
         ],
         tools: [{ type: 'function', function: buildAiFunctionSchema() }],
@@ -374,24 +496,34 @@ export async function generateAiOptimizationPlan(context: AiAdvisorContext): Pro
     }
 
     const parsed = JSON.parse(argsRaw)
+    const budgetGap = budgetGapFromSummary(summary)
+    const aiRecommendationsRaw: AiRecommendation[] = Array.isArray(parsed.recommendations)
+      ? parsed.recommendations.slice(0, 10).map((item: any, idx: number) => ({
+          id: String(item.id || `ai-rec-${idx + 1}`),
+          title: String(item.title || 'Optimization Action'),
+          reason: String(item.reason || ''),
+          target: ['meter', 'device', 'budget', 'behavior'].includes(item.target) ? item.target : 'behavior',
+          priority: safePriority(String(item.priority || 'medium')),
+          effort: safeEffort(String(item.effort || 'medium')),
+          timeframe: ['today', 'this_week', 'this_month'].includes(item.timeframe) ? item.timeframe : 'this_week',
+          estimatedSavingsPkr: round2(Number(item.estimatedSavingsPkr) || 0),
+          steps: Array.isArray(item.steps) ? item.steps.slice(0, 6).map(String) : []
+        }))
+      : []
+
+    const aiRecommendations = prioritizeRecommendations(
+      aiRecommendationsRaw,
+      budgetMode,
+      budgetGap,
+      fallback.recommendations
+    )
+
     const aiPlan: AiOptimizationPlan = {
       version: 1,
       meterMode,
       budgetMode,
       summary: String(parsed.summary || fallback.summary),
-      recommendations: Array.isArray(parsed.recommendations)
-        ? parsed.recommendations.slice(0, 8).map((item: any, idx: number) => ({
-            id: String(item.id || `ai-rec-${idx + 1}`),
-            title: String(item.title || 'Optimization Action'),
-            reason: String(item.reason || ''),
-            target: ['meter', 'device', 'budget', 'behavior'].includes(item.target) ? item.target : 'behavior',
-            priority: safePriority(String(item.priority || 'medium')),
-            effort: safeEffort(String(item.effort || 'medium')),
-            timeframe: ['today', 'this_week', 'this_month'].includes(item.timeframe) ? item.timeframe : 'this_week',
-            estimatedSavingsPkr: round2(Number(item.estimatedSavingsPkr) || 0),
-            steps: Array.isArray(item.steps) ? item.steps.slice(0, 6).map(String) : []
-          }))
-        : fallback.recommendations,
+      recommendations: aiRecommendations.length > 0 ? aiRecommendations : fallback.recommendations,
       meterLoadPlan: {
         applicable: Boolean(parsed?.meterLoadPlan?.applicable),
         rationale: String(parsed?.meterLoadPlan?.rationale || fallback.meterLoadPlan.rationale),
